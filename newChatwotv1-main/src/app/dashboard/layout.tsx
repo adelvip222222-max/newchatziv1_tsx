@@ -5,7 +5,6 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { SignOutButton } from "@/components/dashboard/sign-out";
 import { ThemeToggle } from "@/components/dashboard/theme-toggle";
 import { NotificationsMenu } from "@/components/dashboard/notifications-menu";
-import { TasksMenu } from "@/components/dashboard/tasks-menu";
 import { RealtimeBridge } from "@/components/dashboard/realtime-bridge";
 import { getBillingCatalog } from "@/lib/billing";
 import { BillingProvider } from "@/components/providers/billing-provider";
@@ -33,9 +32,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                 <div className="hidden lg:block">
                   <NotificationsMenu />
-                </div>
-                <div className="hidden lg:block">
-                  <TasksMenu />
                 </div>
                 <ThemeToggle />
                 <div className="hidden md:block">

@@ -1,5 +1,5 @@
 import { Types } from "mongoose";
-import { AiPersona, AiSetting, Bot, Conversation, Message, Task, Tenant, User } from "@/lib/models";
+import { AiPersona, AiSetting, Bot, Conversation, Message, Tenant, User } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/strings";
 import { assertAndReserveQuota } from "@/lib/quota";
@@ -12,6 +12,7 @@ import { generateAiReplyWithMastra } from "@/lib/ai/mastra-orchestrator";
 import { isMastraAllowed, shouldFallbackToLegacy } from "@/lib/ai/orchestrator-flags";
 import { logger } from "@/lib/logger";
 import { isExplicitHumanHandoffRequest } from "@/lib/ai/handoff";
+import { classifyTicketIntent, ensureTicketForConversation } from "@/lib/tickets";
 
 export type GenerateReplyInput = {
   tenantId: string;
@@ -505,6 +506,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     "You are Chatzi AI assistant for this business.",
     "Answer naturally, clearly, and helpfully. Keep the answer concise, friendly, and human-like.",
     "Use the provided business knowledge as the primary source.",
+    "If the customer asks about unrelated general knowledge, programming, weather, animals, food, or any topic outside the business scope, politely explain that you can only help with this business and invite them to ask about products, services, booking, prices, policies, or support.",
     "Do not invent exact business facts such as prices, policies, availability, dates, addresses, guarantees, integrations, or private account details.",
     "If the knowledge is incomplete, say that clearly and provide the closest useful guidance.",
     "Ask one short clarifying question only if needed.",
@@ -528,6 +530,58 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     : transcript;
 
   const temperature = groundedTemperature(setting?.temperature);
+
+  if (lowKnowledgeConfidence && isClearlyOutOfBusinessScope(input.message)) {
+    const scopedReply = buildOutOfScopeReply(input.message);
+    const scopedMessage = await createOutgoingAiReply({
+      tenantId: input.tenantId,
+      conversation,
+      channel: input.channel,
+      reply: scopedReply,
+      metadata: {
+        fastPath: "out_of_business_scope",
+        aiPolicy: {
+          turnCount: nextAiTurnCount,
+          clarificationCount,
+          repeatedUserCount,
+          lowKnowledgeConfidence: true,
+        },
+        knowledge: { enabled: knowledgeEnabled, confidence: knowledge?.confidence ?? 0, sourceCount: knowledge?.results.length ?? 0 },
+      },
+    });
+
+    conversation.aiTurnCount = nextAiTurnCount;
+    conversation.aiStatus = "active";
+    conversation.metadata = {
+      ...metadata,
+      aiPolicy: {
+        ...aiPolicy,
+        lastUserFingerprint: currentUserFingerprint,
+        lastAssistantFingerprint: fingerprint(scopedReply),
+        clarificationCount,
+        repeatedUserCount,
+        lastKnowledgeConfidence: knowledge?.confidence ?? null,
+        lastKnowledgeSourceCount: knowledge?.results.length ?? 0,
+        lastAiReplyAt: new Date().toISOString(),
+      },
+    };
+    await conversation.save();
+
+    void captureWorkflowIfReady({
+      tenantId: input.tenantId,
+      conversation,
+      userMessage: input.message,
+      aiReply: scopedReply,
+      confidence: knowledge?.confidence ?? null,
+    }).catch(() => undefined);
+
+    return {
+      reply: scopedReply,
+      conversationId: conversation._id.toString(),
+      confidence: knowledge?.confidence ?? 0,
+      messageId: scopedMessage._id.toString(),
+    };
+  }
 
   await assertAndReserveQuota(input.tenantId);
 
@@ -704,7 +758,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
             keywords: knowledge.keywords,
             sourceCount: knowledge.results.length,
             sources: (bot.showKnowledgeSources ? knowledge.results.slice(0, 6) : []).map(
-              (result) => ({
+              (result: any) => ({
                 title: result.sourceTitle,
                 url: result.sourceUrl,
                 score: result.score,
@@ -906,42 +960,46 @@ async function captureWorkflowIfReady(input: {
   aiReply: string;
   confidence: number | null;
 }) {
-  const normalized = fingerprint(`${input.userMessage} ${input.aiReply}`);
-  const looksLikeWorkflow = /(شراء|اطلب|طلب|حجز|احجز|اشتراك|سعر|عرض|دفع|مشكله|مشكلة|بلاغ|تذكرة|support|ticket|order|buy|purchase|booking|subscribe)/i.test(normalized);
-  if (!looksLikeWorkflow) return;
+  const directClassification = classifyTicketIntent(input.userMessage);
+  const contextualClassification = directClassification.shouldCreate
+    ? directClassification
+    : classifyTicketIntent(`${input.userMessage}
+${input.aiReply}`);
+  const classification = contextualClassification;
+  if (!classification.shouldCreate) return;
 
-  const existing = await Task.findOne({
+  const ticket = await ensureTicketForConversation({
     tenantId: input.tenantId,
-    conversationId: input.conversation._id,
-    status: { $in: ["open", "in_progress"] },
-    "details.aiWorkflow": true
-  }).select("_id").lean();
-  if (existing) return;
-
-  const task = await Task.create({
-    tenantId: input.tenantId,
-    conversationId: input.conversation._id,
-    type: /مشكله|مشكلة|بلاغ|تذكرة|support|ticket/i.test(normalized) ? "support_ticket" : "sales_request",
-    title: summarizeTaskTitle(input.userMessage),
-    details: {
+    botId: input.conversation.botId?.toString?.() || "",
+    conversationId: input.conversation._id.toString(),
+    triggerReason: classification.reason,
+    category: classification.category,
+    priority: classification.priority,
+    subject: summarizeTicketTitle(input.userMessage),
+    description: [
+      `رسالة العميل: ${input.userMessage}`,
+      input.aiReply ? `رد المساعد: ${input.aiReply}` : "",
+    ].filter(Boolean).join("\n\n"),
+    aiSummary: input.aiReply,
+    source: "ai",
+    metadata: {
       aiWorkflow: true,
-      userMessage: input.userMessage,
-      aiReply: input.aiReply,
       confidence: input.confidence,
       channel: input.conversation.provider || input.conversation.channel,
-      contactId: input.conversation.contactId?.toString?.() || ""
+      contactId: input.conversation.contactId?.toString?.() || "",
+      customerMessage: input.userMessage,
     },
-    status: "open"
   });
+
+  if (!ticket) return;
 
   await notifyWorkflowCapture({
     tenantId: input.tenantId,
     conversation: input.conversation,
-    task,
-    userMessage: input.userMessage
+    ticket,
+    userMessage: input.userMessage,
   });
 }
-
 async function inferAutoPersona(input: {
   tenantId: string;
   message: string;
@@ -1000,18 +1058,18 @@ function mapPersonaToConversationIntent(persona: any, message: string) {
   return "general";
 }
 
-function summarizeTaskTitle(value: string) {
+function summarizeTicketTitle(value: string) {
   const text = value.replace(/\s+/g, " ").trim();
   return (text ? `متابعة طلب عميل: ${text}` : "متابعة طلب عميل من المحادثة").slice(0, 120);
 }
 
-async function notifyWorkflowCapture(input: { tenantId: string; conversation: any; task: any; userMessage: string }) {
+async function notifyWorkflowCapture(input: { tenantId: string; conversation: any; ticket: any; userMessage: string }) {
   const recipients = await resolveWorkflowRecipients(input.tenantId);
   const payload = {
-    type: "ai_workflow_task_created",
+    type: "ai_ticket_created",
     tenantId: input.tenantId,
     conversationId: input.conversation._id.toString(),
-    taskId: input.task._id.toString(),
+    ticketId: input.ticket._id.toString(),
     channel: input.conversation.provider || input.conversation.channel,
     userMessage: input.userMessage
   };
@@ -1045,11 +1103,11 @@ async function notifyWorkflowCapture(input: { tenantId: string; conversation: an
       body: JSON.stringify({
         from: process.env.EMAIL_FROM || process.env.RESEND_FROM_EMAIL || "ChatZi <notifications@chatzi.io>",
         to: recipients,
-        subject: `ChatZi: تم تسجيل مهمة من الموظف الآلي`,
+        subject: `ChatZi: تم تسجيل تذكرة عميل`,
         text: [
-          "تم تسجيل مهمة جديدة من سيناريو الموظف الآلي.",
+          "تم تسجيل تذكرة جديدة بناءً على نية العميل في المحادثة.",
           "",
-          `Task ID: ${input.task._id.toString()}`,
+          `Ticket ID: ${input.ticket._id.toString()}`,
           `Conversation ID: ${input.conversation._id.toString()}`,
           `Channel: ${input.conversation.provider || input.conversation.channel}`,
           `Customer message: ${input.userMessage}`
@@ -1072,6 +1130,28 @@ async function resolveWorkflowRecipients(tenantId: string) {
     : { tenantId, isActive: true, role: { $in: ["owner", "admin", "manager"] } };
   const users = await User.find(userFilter).select("email").limit(5).lean();
   return [...new Set(users.map((user: any) => user.email).filter(Boolean))];
+}
+
+
+function isClearlyOutOfBusinessScope(value: string) {
+  const text = fingerprint(value);
+  if (!text) return false;
+
+  const businessTerms = /(سن|اسنان|ضرس|لثه|حجز|موعد|ميعاد|كشف|طبيب|دكتور|عياده|مركز|ابتسامه|زراعه|تقويم|تبييض|حشو|عصب|تركيبات|فينير|هوليوود|الم|نزيف|سعر|اسعار|خدمه|خدمات|عرض|عروض|دفع|فرع|عنوان|phone|appointment|booking|clinic|dent|dental|tooth|teeth|doctor|price|service|implant|whitening|braces)/i;
+  if (businessTerms.test(text)) return false;
+
+  return /(برمجه|بايثون|كود|html|css|javascript|طقس|درجه الحراره|توقعات الطقس|سماء|لون السماء|فيله|فيل|حيوان|حيوانات|بيض|اكل|طبخ|سياسه|رياضه|اخبار|programming|python|code|weather|temperature|sky|elephant|animal|egg|food|recipe|news|sports)/i.test(text);
+}
+
+function buildOutOfScopeReply(value: string) {
+  const text = fingerprint(value);
+  if (/(طقس|درجه الحراره|توقعات الطقس|weather|temperature)/i.test(text)) {
+    return "أعتذر، لا أستطيع عرض توقعات الطقس من داخل قاعدة معرفة هذا النشاط. أقدر أساعدك في خدمات المركز، الحجز، الأسعار المتاحة، أو أي استفسار يخص الأسنان.";
+  }
+  if (/(برمجه|بايثون|كود|html|css|javascript|programming|python|code)/i.test(text)) {
+    return "أعتذر، دوري هنا هو مساعدتك في خدمات هذا النشاط فقط، ولا أستطيع تعليم البرمجة أو كتابة أكواد. أقدر أساعدك في الحجز أو الاستفسار عن الخدمات والأسعار المتاحة.";
+  }
+  return "أعتذر، هذا السؤال خارج نطاق معلومات هذا النشاط. أقدر أساعدك في الخدمات، الحجز، الأسعار المتاحة، السياسات، أو الدعم الخاص بالمركز.";
 }
 
 function normalizeObject(value: unknown): Record<string, any> {

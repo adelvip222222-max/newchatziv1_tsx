@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { assertObjectIdLike, checkRateLimit, getClientIp, parseJsonBody, safeJsonError } from "@/lib/api-security";
 import { connectToDatabase } from "@/lib/mongodb";
-import { Task } from "@/lib/models/task";
+import { Bot, Ticket } from "@/lib/models";
 
 const bookingSchema = z.object({
   firstName: z.string().trim().min(1).max(80),
@@ -25,24 +25,42 @@ export async function POST(req: Request) {
 
     await connectToDatabase();
 
-    const newTask = await Task.create({
+    const bot = await Bot.findOne({ tenantId, isActive: true }).select("_id name").lean();
+    const counter = await Ticket.countDocuments({ tenantId });
+    const title = `طلب حجز: ${body.firstName} ${body.lastName || ""}`.trim();
+    const newTicket = await Ticket.create({
       tenantId,
-      type: "booking",
-      title: `New booking: ${body.firstName} ${body.lastName || ""}`.trim(),
-      details: {
+      ...(bot?._id && { botId: bot._id }),
+      number: counter + 1,
+      title,
+      subject: title,
+      description: [
+        `الاسم: ${body.firstName} ${body.lastName || ""}`.trim(),
+        `البريد: ${body.email.toLowerCase()}`,
+        body.company ? `الشركة: ${body.company}` : "",
+        body.notes ? `ملاحظات: ${body.notes}` : "",
+      ].filter(Boolean).join("\n"),
+      priority: "medium",
+      category: "booking_request",
+      requesterExternalId: body.email.toLowerCase(),
+      channel: "website",
+      source: "ai",
+      triggerReason: "website_booking_form",
+      aiSummary: body.notes || title,
+      metadata: {
         firstName: body.firstName,
         lastName: body.lastName,
         email: body.email.toLowerCase(),
         company: body.company,
         notes: body.notes,
-        source: "Website Booking"
+        source: "Website Booking",
       },
-      status: "open"
+      status: "open",
     });
 
-    return NextResponse.json({ success: true, taskId: newTask._id });
+    return NextResponse.json({ success: true, ticketId: newTicket._id });
   } catch (error) {
-    console.error("Error creating booking task:", error);
-    return safeJsonError(error, "Unable to create booking request.", 400);
+    console.error("Error creating booking ticket:", error);
+    return safeJsonError(error, "Unable to create booking ticket.", 400);
   }
 }

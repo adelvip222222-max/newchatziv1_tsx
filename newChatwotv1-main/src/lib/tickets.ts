@@ -7,6 +7,8 @@ export type TicketCategory =
   | "technical_support"
   | "complaint"
   | "human_request"
+  | "booking_request"
+  | "sales_request"
   | "ai_failed"
   | "general";
 
@@ -47,6 +49,12 @@ function buildSubject(input: {
   if (input.category === "human_request") {
     return `طلب موظف بشري - ${input.externalUserId}`;
   }
+  if (input.category === "booking_request") {
+    return `طلب حجز عميل - ${input.externalUserId}`;
+  }
+  if (input.category === "sales_request") {
+    return `طلب مبيعات عميل - ${input.externalUserId}`;
+  }
   if (input.category === "ai_failed") {
     return `متابعة فشل AI - ${input.externalUserId}`;
   }
@@ -54,9 +62,9 @@ function buildSubject(input: {
 }
 
 export function classifyTicketIntent(message: string): TicketIntentClassification {
-  const normalized = message.toLowerCase();
+  const normalized = message.toLowerCase().replace(/[إأآا]/g, "ا").replace(/[ىي]/g, "ي").replace(/ة/g, "ه");
 
-  if (/(موظف|بشري|انسان|إنسان|خدمة\s*العملاء|الدعم\s*البشري|\bhuman\b|\bagent\b|representative)/i.test(message)) {
+  if (/(موظف|بشري|انسان|خدمه\s*العملاء|الدعم\s*البشري|\bhuman\b|\bagent\b|representative|real person)/i.test(normalized)) {
     return {
       shouldCreate: true,
       category: "human_request",
@@ -65,7 +73,25 @@ export function classifyTicketIntent(message: string): TicketIntentClassificatio
     };
   }
 
-  if (/(شكوى|اشتكي|زعلان|غاضب|سيء|سىء|مشكلة كبيرة|complaint|angry|bad service)/i.test(message)) {
+  if (/(حجز|احجز|موعد|ميعاد|كشف|استشاره|استشارة|زيارة|appointment|booking|reserve|schedule)/i.test(normalized)) {
+    return {
+      shouldCreate: true,
+      category: "booking_request",
+      priority: /(طارئ|مستعجل|الم|ألم|نزيف|urgent|emergency)/i.test(normalized) ? "urgent" : "medium",
+      reason: "customer_booking_intent",
+    };
+  }
+
+  if (/(اشتري|شراء|اطلب|طلب|منتج|سعر|اسعار|عرض|باقة|باقه|اشتراك|sales|buy|purchase|order|quote|pricing)/i.test(normalized)) {
+    return {
+      shouldCreate: true,
+      category: "sales_request",
+      priority: "medium",
+      reason: "customer_sales_intent",
+    };
+  }
+
+  if (/(شكوى|اشتكي|زعلان|غاضب|سيء|سىء|مش راضي|complaint|angry|bad service)/i.test(normalized)) {
     return {
       shouldCreate: true,
       category: "complaint",
@@ -74,7 +100,7 @@ export function classifyTicketIntent(message: string): TicketIntentClassificatio
     };
   }
 
-  if (/(دعم فني|مشكلة تقنية|لا يعمل|مش شغال|عطل|خطأ|bug|error|technical support|not working)/i.test(normalized)) {
+  if (/(دعم فني|مشكله تقنيه|مشكلة تقنية|لا يعمل|مش شغال|عطل|خطا|خطأ|bug|error|technical support|not working)/i.test(normalized)) {
     return {
       shouldCreate: true,
       category: "technical_support",

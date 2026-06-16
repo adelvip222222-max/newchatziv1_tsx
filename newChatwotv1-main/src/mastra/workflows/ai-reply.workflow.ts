@@ -111,6 +111,8 @@ const aiReplyRunContextSchema = aiReplyInputSchema.extend({
         "technical_support",
         "complaint",
         "human_request",
+        "booking_request",
+        "sales_request",
         "ai_failed",
         "general",
       ]),
@@ -193,6 +195,39 @@ function sanitizeCustomerReply(value: string) {
     .replace(/\bRAG\b/gi, "المعرفة المتاحة")
     .replace(/\bconfidence score\b/gi, "درجة التأكد")
     .trim();
+}
+
+
+function normalizeScopeText(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670]/g, "")
+    .replace(/[إأآا]/g, "ا")
+    .replace(/[ة]/g, "ه")
+    .replace(/[ىي]/g, "ي")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function isClearlyOutOfBusinessScope(value: string) {
+  const text = normalizeScopeText(value);
+  if (!text) return false;
+
+  const businessTerms = /(سن|اسنان|ضرس|لثه|حجز|موعد|ميعاد|كشف|طبيب|دكتور|عياده|مركز|ابتسامه|زراعه|تقويم|تبييض|حشو|عصب|تركيبات|فينير|هوليوود|الم|نزيف|سعر|اسعار|خدمه|خدمات|عرض|عروض|دفع|فرع|عنوان|phone|appointment|booking|clinic|dent|dental|tooth|teeth|doctor|price|service|implant|whitening|braces)/i;
+  if (businessTerms.test(text)) return false;
+
+  return /(برمجه|بايثون|كود|html|css|javascript|طقس|درجه الحراره|توقعات الطقس|سماء|لون السماء|فيله|فيل|حيوان|حيوانات|بيض|اكل|طبخ|سياسه|رياضه|اخبار|programming|python|code|weather|temperature|sky|elephant|animal|egg|food|recipe|news|sports)/i.test(text);
+}
+
+function buildOutOfScopeReply(value: string) {
+  const text = normalizeScopeText(value);
+  if (/(طقس|درجه الحراره|توقعات الطقس|weather|temperature)/i.test(text)) {
+    return "أعتذر، لا أستطيع عرض توقعات الطقس من داخل قاعدة معرفة هذا النشاط. أقدر أساعدك في الخدمات، الحجز، الأسعار المتاحة، أو أي استفسار يخص المركز.";
+  }
+  if (/(برمجه|بايثون|كود|html|css|javascript|programming|python|code)/i.test(text)) {
+    return "أعتذر، دوري هنا هو مساعدتك في خدمات هذا النشاط فقط، ولا أستطيع تعليم البرمجة أو كتابة أكواد. أقدر أساعدك في الحجز أو الاستفسار عن الخدمات والأسعار المتاحة.";
+  }
+  return "أعتذر، هذا السؤال خارج نطاق معلومات هذا النشاط. أقدر أساعدك في الخدمات، الحجز، الأسعار المتاحة، السياسات، أو الدعم الخاص بالمركز.";
 }
 
 // handoffReplyFor removed — the AI agent now generates natural context-aware handoff messages
@@ -460,6 +495,7 @@ const generateReplyStep = createStep({
       "You are Chatzi AI assistant for this business.",
       "Answer naturally, clearly, and helpfully. Keep replies concise, friendly, and human-like.",
       "Use the provided business knowledge as the primary source.",
+      "If the customer asks about unrelated general knowledge, programming, weather, animals, food, or any topic outside the business scope, politely explain that you can only help with this business and invite them to ask about products, services, booking, prices, policies, or support.",
       "Do not invent exact business facts such as prices, policies, availability, dates, addresses, guarantees, integrations, or private account details.",
       "If the knowledge is incomplete, say that clearly and provide the closest useful guidance.",
       "Ask one short clarifying question only if needed.",
@@ -472,6 +508,16 @@ const generateReplyStep = createStep({
     ]
       .filter(Boolean)
       .join("\n\n");
+
+    if (isClearlyOutOfBusinessScope(inputData.message) && (!inputData.knowledge || !inputData.knowledge.results.length)) {
+      return {
+        ...inputData,
+        action: "reply" as const,
+        reply: buildOutOfScopeReply(inputData.message),
+        reason: "out_of_business_scope",
+        modelCalled: false,
+      };
+    }
 
     const timeout = withTimeoutSignal();
     const attachmentDescription = describeAttachmentsForAi(

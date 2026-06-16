@@ -245,12 +245,40 @@ function latestPersistedMessageTimestamp(messages: MessageItem[]) {
   }, "");
 }
 
+function getMessageDedupeKey(message: MessageItem) {
+  const timestamp = new Date(message.createdAt).getTime();
+  const bucket = Number.isNaN(timestamp) ? 0 : Math.floor(timestamp / 10_000);
+  const content = String(message.content || "").replace(/\s+/g, " ").trim().toLowerCase();
+  return [message.direction, message.sender, content, bucket].join("|");
+}
+
 function mergeMessages(current: MessageItem[], incoming: MessageItem[]) {
   if (!incoming.length) return current;
 
-  const byId = new Map(current.map((message) => [message.id, message]));
-  for (const message of incoming) {
-    byId.set(message.id, message);
+  const byId = new Map<string, MessageItem>();
+  const byFingerprint = new Map<string, string>();
+
+  for (const message of [...current, ...incoming]) {
+    const fingerprint = getMessageDedupeKey(message);
+    const existingId = byFingerprint.get(fingerprint);
+
+    if (existingId) {
+      const existing = byId.get(existingId);
+      const preferIncomingPersisted = existing?.id.startsWith("temp-") && !message.id.startsWith("temp-");
+      if (preferIncomingPersisted || new Date(message.createdAt).getTime() >= new Date(existing?.createdAt || 0).getTime()) {
+        byId.delete(existingId);
+        byId.set(message.id, { ...(existing || message), ...message });
+        byFingerprint.set(fingerprint, message.id);
+      }
+      continue;
+    }
+
+    if (byId.has(message.id)) {
+      byId.set(message.id, { ...(byId.get(message.id) as MessageItem), ...message });
+    } else {
+      byId.set(message.id, message);
+    }
+    byFingerprint.set(fingerprint, message.id);
   }
 
   return Array.from(byId.values()).sort(

@@ -20,8 +20,8 @@ export default async function KnowledgePage() {
         title={isAr ? "قاعدة المعرفة" : "Knowledge base"}
         description={
           isAr
-            ? "نظم معرفة البوت إلى Categories وCollections وTags، ثم دربها لتكون مصدر الحقيقة الأول للردود."
-            : "Organize bot knowledge into categories, collections, and tags, then train it as the primary answer source."
+            ? "اكتب أو ارفع معرفة النشاط دفعة واحدة، وسيتم استخراج النص وتصنيفه وتدريبه تلقائيًا."
+            : "Write or upload business knowledge in bulk. Text is extracted, classified, and trained automatically."
         }
         action={
           <Link href="/dashboard/knowledge/health" className="btn-secondary">

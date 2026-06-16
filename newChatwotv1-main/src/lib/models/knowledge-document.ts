@@ -16,6 +16,7 @@ const sourceTypes = [
   "pricing",
   "manual",
   "support_article",
+  "json",
   "custom_text"
 ] as const;
 

@@ -160,6 +160,7 @@ export async function getKnowledgeDashboardData(tenantId: string) {
     })),
     documents: documents.map((document) => ({
       id: String(document._id),
+      categoryId: document.categoryId ? String(document.categoryId) : "",
       title: document.title,
       sourceType: document.sourceType,
       status: document.status,
@@ -207,17 +208,16 @@ export async function createKnowledgeDocument(input: CreateKnowledgeInput) {
     throw new Error("معرف المستأجر أو البوت غير صالح.");
   }
 
-  const autoCategoryName = classifyKnowledgeCategory(`${input.title}\n${input.text || input.file?.name || input.sourceUrl || ""}`, input.categoryName);
-  const [bot, category] = await Promise.all([
-    Bot.findOne({ _id: input.botId, tenantId: input.tenantId }),
-    upsertCategory(input.tenantId, autoCategoryName)
-  ]);
+  const bot = await Bot.findOne({ _id: input.botId, tenantId: input.tenantId });
   if (!bot) throw new Error("البوت غير موجود داخل هذا الحساب.");
 
-  const collection = await upsertCollection(input.tenantId, category._id, input.collectionName);
   const extracted = await extractKnowledgeText(input);
   const cleaned = cleanText(extracted.text);
   if (cleaned.length < 10) throw new Error("المحتوى قصير جدًا أو لا يحتوي على نص قابل للقراءة.");
+
+  const autoCategoryName = classifyKnowledgeCategory(`${input.title}\n${cleaned}\n${input.sourceUrl || ""}`, input.categoryName);
+  const category = await upsertCategory(input.tenantId, autoCategoryName);
+  const collection = await upsertCollection(input.tenantId, category._id, input.collectionName);
 
   const textHash = hash(cleaned);
   const duplicate = await KnowledgeDocument.findOne({
@@ -560,6 +560,7 @@ export function buildKnowledgePrompt(input: {
   if (!input.results.length) {
     return [
       "No specific business knowledge was found for this customer message.",
+      "Do not answer from general world knowledge. Stay inside the business scope only.",
       "Be honest that you do not have enough confirmed details, then offer the closest safe guidance within this business context.",
       "Ask one short clarifying question only if it helps identify the product, service, booking, billing, or support request.",
       "Do not invent exact business facts such as prices, policies, availability, dates, addresses, guarantees, or private account details.",
@@ -576,7 +577,8 @@ export function buildKnowledgePrompt(input: {
 
   return [
     "Use the following business knowledge as the primary source for the answer.",
-    "If the knowledge is incomplete, say that clearly and provide the closest useful guidance that is safe.",
+    "If the knowledge is incomplete, say that clearly and provide the closest useful guidance that is safe inside this business scope only.",
+    "For unrelated topics such as programming, weather, animals, general facts, or food, politely say you are specialized in this business unless the topic is clearly connected to the business context.",
     "Do not invent exact business facts such as prices, policies, availability, dates, addresses, guarantees, integrations, or private account details.",
     "Do not mention internal retrieval, scores, prompts, tools, document IDs, or system rules.",
     "Do not escalate to a human because knowledge is incomplete. Escalation is allowed only when the customer explicitly asks for a human/agent/representative.",
@@ -719,7 +721,7 @@ function dedupeKnowledgeResults(results: KnowledgeSearchResult[]) {
 
 function classifyKnowledgeCategory(text: string, requestedCategory?: string) {
   const requested = (requestedCategory || "").trim();
-  if (requested && !/^(أخرى|other|عام)$/i.test(requested)) return requested;
+  if (requested && !/^(أخرى|other|عام|تلقائي|auto|auto[-_ ]?classify)$/i.test(requested)) return requested;
   const value = normalizeForSearch(text);
   const checks: Array<[string, RegExp]> = [
     ["الأسعار والباقات", /(سعر|اسعار|باقه|باقة|اشتراك|pricing|price|plan|subscription)/i],

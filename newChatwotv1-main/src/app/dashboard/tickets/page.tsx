@@ -22,6 +22,8 @@ const categoryLabels: Record<string, string> = {
   technical_support: "دعم فني",
   complaint: "شكوى",
   human_request: "طلب موظف",
+  booking_request: "طلب حجز",
+  sales_request: "طلب مبيعات",
   ai_failed: "فشل AI",
   general: "عام",
 };
@@ -52,7 +54,7 @@ export default async function TicketsPage() {
     <>
       <PageHeader
         title="التذاكر"
-        description="لوحة متابعة طلبات الدعم والشكاوى المحولة من المحادثات."
+        description="لوحة متابعة طلبات العملاء حسب نية المحادثة: حجز، مبيعات، دعم، شكاوى أو طلب موظف."
       />
 
       <section className="mb-5 grid gap-4 md:grid-cols-3">

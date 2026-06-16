@@ -316,7 +316,7 @@ async function upsertInsight(
         customerFacts: analysis.customerFacts,
         recommendedActions: analysis.recommendedActions,
         detectedTags: analysis.detectedTags,
-        knowledgeSources: (knowledge?.results || []).slice(0, 6).map((result) => ({
+        knowledgeSources: (knowledge?.results || []).slice(0, 6).map((result: { sourceTitle: string, sourceUrl?: string, score: number, documentId: string }) => ({
           title: result.sourceTitle,
           url: result.sourceUrl,
           score: result.score,

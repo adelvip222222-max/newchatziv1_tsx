@@ -11,8 +11,6 @@ import { buildMessageDedupeKey } from "@/lib/messages/dedupe";
 
 initializeAdapters();
 
-
-
 type IngressJobPayload = {
   tenantId: string;
   provider: ChannelProvider;
@@ -282,7 +280,7 @@ async function ensureConversationHasBot(tenantId: string, conversation: any, cha
 
 function applyHandoffKeywords(conversation: any, text: string) {
   const textLower = text.toLowerCase();
-  const isHandoff = HANDOVER_KEYWORDS.some((keyword) => textLower.includes(keyword));
+  const isHandoff = isExplicitHumanHandoffRequest(text);
 
   if (isHandoff) {
     const metadata = conversation.metadata && typeof conversation.metadata === "object" ? conversation.metadata : {};

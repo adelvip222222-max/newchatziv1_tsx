@@ -19,7 +19,6 @@ import {
   PlugZap,
   Settings,
   Sparkles,
-  Users,
   X,
   Download,
   Bell,
@@ -72,7 +71,6 @@ export function Sidebar({ role }: { role?: string }) {
     { href: "/dashboard/conversations", label: t.nav.conversations, icon: MessageSquare },
     { href: "/dashboard/tickets", label: locale === "ar" ? "التذاكر" : "Tickets", icon: ClipboardCheck },
     { href: "/dashboard/notifications", label: locale === "ar" ? "الإشعارات" : "Notifications", icon: Bell },
-    { href: "/dashboard/tasks", label: locale === "ar" ? "المهام" : "Tasks", icon: ClipboardCheck },
     { href: "/dashboard/settings", label: t.nav.settings, icon: Settings },
   ];
 
@@ -84,7 +82,6 @@ export function Sidebar({ role }: { role?: string }) {
     { href: "/dashboard/channels", label: t.nav.channels, icon: PlugZap },
     { href: "/dashboard/knowledge", label: t.nav.knowledge, icon: BookOpenText },
     { href: "/dashboard/bots", label: t.nav.bots, icon: Bot },
-    { href: "/dashboard/personas", label: locale === "ar" ? "الموظفون الآليون" : "AI Personas", icon: Users },
     { href: "/dashboard/simulator", label: locale === "ar" ? "محاكي البوت" : "Bot Simulator", icon: PlaySquare },
     ...(role === "admin" ? [{ href: "/admin/ai-models", label: locale === "ar" ? "مفاتيح AI" : "AI API Keys", icon: KeyRound }] : []),
     { href: "/dashboard/billing", label: t.nav.billing, icon: CreditCard },

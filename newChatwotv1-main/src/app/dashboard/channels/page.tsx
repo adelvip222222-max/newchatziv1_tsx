@@ -149,69 +149,52 @@ export default async function ChannelsPage() {
         />
       </section>
 
-      <section className="mt-5 grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-        {data.cards.map((channel) => {
-          const Icon = channel.icon;
-          return (
-            <article
-              key={channel.type}
-              className={`overflow-hidden rounded-md border bg-white shadow-sm transition hover:border-slate-300 dark:bg-slate-950 ${
-                channel.connected
-                  ? "border-emerald-200 dark:border-emerald-900/60"
-                  : channel.hasIssue
-                    ? "border-red-200 dark:border-red-900/60"
-                    : "border-slate-200 dark:border-slate-800"
-              }`}
-            >
-              <div className={`h-1.5 ${channel.connected ? "bg-emerald-500" : channel.hasIssue ? "bg-red-500" : "bg-slate-300 dark:bg-slate-700"}`} />
-              <div className="flex h-full min-h-72 flex-col p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md ${
+      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {data.cards.map((channel) => {
+            const Icon = channel.icon;
+            const connectedLabel = isAr ? "متصلة" : "Connected";
+            const disconnectedLabel = isAr ? "غير متصلة" : "Disconnected";
+            return (
+              <article key={channel.type} className="flex flex-col gap-4 p-4 transition hover:bg-slate-50/70 dark:hover:bg-slate-900/50 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-center gap-4">
+                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${
                     channel.connected
                       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
                       : channel.hasIssue
                         ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300"
                         : "bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300"
                   }`}>
-                    <Icon size={21} />
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-bold ${
-                    channel.connected
-                      ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900"
-                      : channel.hasIssue
-                        ? "bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900"
-                        : "bg-slate-100 text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800"
-                  }`}>
-                    {channel.connected ? <CheckCircle size={14} /> : <AlertTriangle size={14} />}
-                    {channel.connected ? "Connected" : "Not Connected"}
+                    <Icon size={22} />
                   </span>
-                </div>
-
-                <div className="mt-4 flex-1">
-                  <h2 className="text-lg font-bold text-ink">{channel.title[locale]}</h2>
-                  <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">{channel.desc[locale]}</p>
-                  <dl className="mt-4 grid gap-2 text-xs">
-                    <StatusLine label="Active" value={channel.isActive ? "Active" : "Inactive"} ok={channel.isActive} />
-                    <StatusLine label="Connected" value={channel.connected ? "Connected" : "Missing setup"} ok={channel.connected} />
-                    <StatusLine label="Receiving Messages" value={`${channel.inbound24h} / 24h`} ok={channel.inbound24h > 0} neutral={!channel.inbound24h && channel.connected} />
-                    <StatusLine label="Webhook Status" value={channel.webhookStatus} ok={channel.webhookHealthy} neutral={channel.webhookStatus === "No traffic"} />
-                  </dl>
-                  <div className="mt-4 rounded-md bg-slate-50 p-3 text-xs leading-5 text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                    <div className="flex items-center gap-2">
-                      <RadioTower size={14} />
-                      <span>{isAr ? "آخر اتصال" : "Last connection"}: {channel.lastConnectionAt ? formatDate(channel.lastConnectionAt, locale) : "-"}</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-base font-extrabold text-ink">{channel.title[locale]}</h2>
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
+                        channel.connected
+                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:ring-emerald-900"
+                          : channel.hasIssue
+                            ? "bg-red-50 text-red-700 ring-1 ring-red-200 dark:bg-red-950/30 dark:text-red-300 dark:ring-red-900"
+                            : "bg-slate-100 text-slate-600 ring-1 ring-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:ring-slate-800"
+                      }`}>
+                        {channel.connected ? <CheckCircle size={13} /> : <AlertTriangle size={13} />}
+                        {channel.connected ? connectedLabel : disconnectedLabel}
+                      </span>
                     </div>
-                    <div className="mt-1 flex items-center gap-2">
-                      <Activity size={14} />
-                      <span>{isAr ? "آخر مزامنة" : "Last sync"}: {channel.lastSyncAt ? formatDate(channel.lastSyncAt, locale) : "-"}</span>
-                    </div>
+                    <p className="mt-1 line-clamp-1 text-sm text-slate-500 dark:text-slate-400">{channel.desc[locale]}</p>
+                    <p className="mt-2 text-xs text-slate-400">
+                      {isAr ? "آخر اتصال" : "Last connection"}: {channel.lastConnectionAt ? formatDate(channel.lastConnectionAt, locale) : "-"}
+                      <span className="mx-2">•</span>
+                      Webhook: {channel.webhookStatus}
+                      <span className="mx-2">•</span>
+                      {isAr ? "رسائل آخر 24 ساعة" : "Messages 24h"}: {channel.inbound24h}
+                    </p>
                   </div>
                 </div>
 
-                <div className="mt-5 grid gap-2 sm:grid-cols-2">
-                  <Link href={channel.href} className={channel.connected ? "btn-secondary min-h-11 justify-center" : "btn-primary min-h-11 justify-center"}>
-                    <span>{channel.connected ? "Configure" : "Connect Channel"}</span>
-                    <ArrowRight size={16} className="rtl:rotate-180" />
+                <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+                  <Link href={channel.href} className="btn-primary min-h-10 justify-center px-4">
+                    {isAr ? "الإعدادات" : "Settings"}
                   </Link>
                   {channel.channelId ? (
                     <form action={disconnectChannel}>
@@ -219,21 +202,17 @@ export default async function ChannelsPage() {
                       <input type="hidden" name="botId" value={channel.botId} />
                       <button
                         type="submit"
-                        className="min-h-11 w-full rounded-md border border-slate-200 px-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
+                        className="min-h-10 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900"
                       >
-                        Disconnect
+                        {isAr ? "فصل" : "Disconnect"}
                       </button>
                     </form>
-                  ) : (
-                    <Link href={channel.href} className="min-h-11 rounded-md border border-slate-200 px-3 text-center text-sm font-bold leading-[2.75rem] text-slate-600 transition hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900">
-                      Configure
-                    </Link>
-                  )}
+                  ) : null}
                 </div>
-              </div>
-            </article>
-          );
-        })}
+              </article>
+            );
+          })}
+        </div>
       </section>
     </>
   );

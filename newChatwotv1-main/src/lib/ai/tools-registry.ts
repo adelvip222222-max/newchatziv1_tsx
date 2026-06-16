@@ -1,7 +1,7 @@
 import { Task } from "@/lib/models/task";
 import { Lead } from "@/lib/models/lead";
-import { Ticket } from "@/lib/models/ticket";
 import { connectToDatabase } from "@/lib/mongodb";
+import { ensureTicketForConversation, type TicketCategory, type TicketPriority } from "@/lib/tickets";
 
 /**
  * Registry mapping tool names to their OpenAI function definitions.
@@ -9,7 +9,7 @@ import { connectToDatabase } from "@/lib/mongodb";
  * Tools available to the AI:
  *  - save_extracted_data: generic data extraction → Task (legacy, kept for compat)
  *  - save_lead_data: upsert lead details by contactId (idempotent, Day 5 foundation)
- *  - create_ticket: create a support ticket as a Task (Day 5 foundation)
+ *  - create_ticket: create or update a real Ticket without pausing AI
  *  - update_contact_profile: update structured contact fields
  *  - escalate_to_human: hand off conversation to human agent
  */
@@ -56,7 +56,7 @@ export const AVAILABLE_TOOLS: Record<string, any> = {
     type: "function",
     function: {
       name: "create_ticket",
-      description: "Creates a support ticket from the current conversation. Use when the user reports a problem, requests help, or needs follow-up that the AI cannot resolve immediately.",
+      description: "Creates or updates a real customer ticket from the current conversation without pausing AI. Use for booking, sales, support, complaints, or follow-up intent.",
       parameters: {
         type: "object",
         properties: {
@@ -67,7 +67,7 @@ export const AVAILABLE_TOOLS: Record<string, any> = {
             enum: ["low", "medium", "high", "urgent"],
             description: "Ticket priority based on urgency signals in the conversation"
           },
-          category: { type: "string", description: "Category or department for routing (e.g., billing, technical, shipping)" }
+          category: { type: "string", enum: ["technical_support", "complaint", "human_request", "booking_request", "sales_request", "ai_failed", "general"], description: "Ticket category for routing" }
         },
         required: ["title", "description"]
       }
@@ -114,6 +114,7 @@ type ToolContext = {
   tenantId: string;
   conversationId: string;
   contactId?: string;
+  botId?: string;
   conversation?: any;
   sendSmsCallback?: Function;
 };
@@ -186,33 +187,30 @@ export const TOOL_EXECUTORS: Record<string, Function> = {
 
   create_ticket: async (args: any, context: ToolContext) => {
     await connectToDatabase();
-    const { title, description, priority = "medium", category } = args;
+    const { title, description, priority = "medium", category = "general" } = args;
 
-    if (!title?.trim()) return "Ticket title is required.";
+    if (!title?.trim() && !description?.trim()) return "Ticket title or description is required.";
 
-    // Prevent duplicate open tickets for same conversation
-    const existing = await Ticket.findOne({
+    const botId = context.botId || context.conversation?.botId?.toString?.() || "";
+    if (!botId) return "Cannot create ticket: missing botId in tool context.";
+
+    const ticket = await ensureTicketForConversation({
       tenantId: context.tenantId,
+      botId,
       conversationId: context.conversationId,
-      status: { $in: ["open", "in_progress", "pending"] }
+      triggerReason: "ai_tool_create_ticket",
+      category: (category || "general") as TicketCategory,
+      priority: (priority || "medium") as TicketPriority,
+      subject: title?.trim() || "متابعة طلب عميل",
+      description: description || title || "",
+      source: "ai",
+      metadata: {
+        tool: "create_ticket",
+        aiWorkflow: true,
+      },
     });
 
-    if (existing) {
-      return `Ticket already open for this conversation (ID: ${existing._id}). No duplicate created.`;
-    }
-
-    const ticket = await Ticket.create({
-      tenantId: context.tenantId,
-      conversationId: context.conversationId,
-      ...(context.contactId && { contactId: context.contactId }),
-      title: title.trim(),
-      description: description || "",
-      priority,
-      category: category || "",
-      status: "open"
-    });
-
-    return `Support ticket created (ID: ${ticket._id}). Priority: ${priority}.`;
+    return `Ticket saved (ID: ${ticket?._id}). AI auto-reply remains active.`;
   },
 
   update_contact_profile: async (args: any, context: ToolContext) => {

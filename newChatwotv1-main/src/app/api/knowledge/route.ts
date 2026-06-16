@@ -14,8 +14,8 @@ const schema = z.object({
   botId: z.string().min(1),
   title: z.string().min(2),
   sourceType: z.enum(sourceTypesArray),
-  categoryName: z.string().min(2),
-  collectionName: z.string().min(1),
+  categoryName: z.string().optional().default("تلقائي"),
+  collectionName: z.string().optional().default("عام"),
   tags: z.string().optional(),
   text: z.string().optional(),
   sourceUrl: z.string().optional(),
@@ -31,9 +31,9 @@ export async function POST(request: Request) {
     const body = schema.parse({
       botId: form.get("botId"),
       title: form.get("title"),
-      sourceType: form.get("sourceType"),
-      categoryName: form.get("categoryName"),
-      collectionName: form.get("collectionName"),
+      sourceType: normalizeSourceType(String(form.get("sourceType") || "custom_text"), fileValue),
+      categoryName: form.get("categoryName") || "تلقائي",
+      collectionName: form.get("collectionName") || "عام",
       tags: form.get("tags") || "",
       text: form.get("text") || "",
       sourceUrl: form.get("sourceUrl") || "",
@@ -73,4 +73,23 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : "تعذر حفظ مصدر المعرفة.";
     return NextResponse.json({ error: message }, { status: 400 });
   }
+}
+
+function normalizeSourceType(value: string, fileValue: FormDataEntryValue | null) {
+  const raw = value.trim().toLowerCase();
+  const fileName = fileValue instanceof File ? fileValue.name.toLowerCase() : "";
+  const byExtension = fileName.endsWith(".pdf")
+    ? "pdf"
+    : fileName.endsWith(".docx")
+      ? "docx"
+      : fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
+        ? "excel"
+        : fileName.endsWith(".csv")
+          ? "csv"
+          : fileName.endsWith(".json")
+            ? "json"
+            : fileName.endsWith(".txt")
+              ? "txt"
+              : "";
+  return byExtension || (raw === "auto" ? "custom_text" : raw);
 }

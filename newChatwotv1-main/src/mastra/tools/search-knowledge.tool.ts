@@ -49,7 +49,7 @@ export const searchKnowledgeTool = createTool({
       confidence: knowledge.confidence,
       intent: knowledge.intent,
       keywords: knowledge.keywords,
-      results: knowledge.results.map((result) => ({
+      results: knowledge.results.map((result: any) => ({
         text: result.text,
         score: result.score,
         sourceTitle: result.sourceTitle,
