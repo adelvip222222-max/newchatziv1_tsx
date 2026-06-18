@@ -565,8 +565,22 @@ const generateReplyStep = createStep({
         },
       });
 
+      let replyText = result.text?.trim() || "";
+      let ticketToCreate = inputData.ticket;
+
+      const ticketMatch = replyText.match(/\[CREATE_TICKET:\s*(booking_request|sales_request)\]/i);
+      if (ticketMatch) {
+        ticketToCreate = {
+          shouldCreate: true,
+          category: ticketMatch[1].toLowerCase() as "booking_request" | "sales_request",
+          priority: "medium",
+          reason: "ai_detected_intent",
+        };
+        replyText = replyText.replace(ticketMatch[0], "").trim();
+      }
+
       const shouldHandoff =
-        inputData.reason === "explicit_human_request" && inputData.ticket?.shouldCreate;
+        inputData.reason === "explicit_human_request" && ticketToCreate?.shouldCreate;
 
       logger.info("ai.model_reply", {
         mode: "mastra_orchestrator",
@@ -583,7 +597,8 @@ const generateReplyStep = createStep({
       return {
         ...inputData,
         action: shouldHandoff ? ("handoff" as const) : ("reply" as const),
-        reply: result.text?.trim() || "",
+        reply: replyText,
+        ticket: ticketToCreate,
         responseId: (result as { runId?: string }).runId || "",
         providerUsed: resolvedModel.providerUsed,
         modelUsed: resolvedModel.modelUsed,

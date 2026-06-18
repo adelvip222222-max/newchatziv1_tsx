@@ -73,23 +73,7 @@ export function classifyTicketIntent(message: string): TicketIntentClassificatio
     };
   }
 
-  if (/(حجز|احجز|موعد|ميعاد|كشف|استشاره|استشارة|زيارة|appointment|booking|reserve|schedule)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "booking_request",
-      priority: /(طارئ|مستعجل|الم|ألم|نزيف|urgent|emergency)/i.test(normalized) ? "urgent" : "medium",
-      reason: "customer_booking_intent",
-    };
-  }
-
-  if (/(اشتري|شراء|اطلب|طلب|منتج|سعر|اسعار|عرض|باقة|باقه|اشتراك|sales|buy|purchase|order|quote|pricing)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "sales_request",
-      priority: "medium",
-      reason: "customer_sales_intent",
-    };
-  }
+  // Booking and sales intents are now handled dynamically by the AI agent to avoid hardcoded regex.
 
   if (/(شكوى|اشتكي|زعلان|غاضب|سيء|سىء|مش راضي|complaint|angry|bad service)/i.test(normalized)) {
     return {
