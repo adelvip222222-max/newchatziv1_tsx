@@ -13,6 +13,7 @@ import { isMastraAllowed, shouldFallbackToLegacy } from "@/lib/ai/orchestrator-f
 import { logger } from "@/lib/logger";
 import { isExplicitHumanHandoffRequest } from "@/lib/ai/handoff";
 import { classifyTicketIntent, ensureTicketForConversation } from "@/lib/tickets";
+import { detectAndReplyFast } from "@/lib/ai/fast-intent-responder";
 
 export type GenerateReplyInput = {
   tenantId: string;
@@ -321,28 +322,34 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     .limit(MAX_MESSAGES_FETCH)
     .lean();
 
-  const priorAssistantCount = previousMessages.filter((message) => message.direction === "outgoing" && message.sender === "assistant").length;
-  const firstTurnGreeting = priorAssistantCount === 0 && isGreetingOnly(input.message);
+  const tenantDisplayName = await resolveTenantDisplayName(input.tenantId, bot.name);
+  const fastIntent = await detectAndReplyFast({
+    tenantId: input.tenantId,
+    botId: input.botId,
+    message: input.message,
+    botName: bot.name,
+    businessName: tenantDisplayName,
+    language: setting?.language || "auto",
+    role: setting?.role || "assistant",
+    tone: setting?.tone || "friendly",
+    responseLength: setting?.responseLength || "short",
+    fallbackMessage: setting?.fallbackMessage,
+  });
 
-  if (firstTurnGreeting) {
-    const tenantDisplayName = await resolveTenantDisplayName(input.tenantId, bot.name);
-    const personas = await AiPersona.find({ tenantId: input.tenantId, isActive: true })
-      .sort({ createdAt: 1 })
-      .select("roleName description greetingMessage personaType")
-      .limit(6)
-      .lean();
-
-    const reply = buildWelcomeReply(tenantDisplayName, personas);
+  if (fastIntent.handled && fastIntent.reply) {
     const replyMessage = await createOutgoingAiReply({
       tenantId: input.tenantId,
       conversation,
       channel: input.channel,
-      reply,
+      reply: fastIntent.reply,
       metadata: {
-        fastPath: "first_greeting",
-        tenantDisplayName,
-        personaCount: personas.length
-      }
+        fastPath: fastIntent.reason || `ai_fast_${fastIntent.intent}`,
+        fastIntent: fastIntent.intent,
+        fastLanguage: fastIntent.language,
+        fastModelCalled: fastIntent.modelCalled,
+        fastProviderUsed: fastIntent.providerUsed,
+        fastModelUsed: fastIntent.modelUsed,
+      },
     });
 
     conversation.aiTurnCount = Number(conversation.aiTurnCount || 0) + 1;
@@ -351,16 +358,16 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       ...normalizeObject(conversation.metadata),
       aiPolicy: {
         ...normalizeObject(normalizeObject(conversation.metadata).aiPolicy),
-        greetedAt: new Date().toISOString(),
-        fastGreeting: true
-      }
+        lastFastIntent: fastIntent.intent,
+        lastFastIntentAt: new Date().toISOString(),
+      },
     };
     await conversation.save();
 
     return {
-      reply,
+      reply: fastIntent.reply,
       conversationId: conversation._id.toString(),
-      confidence: 100,
+      confidence: fastIntent.confidence,
       messageId: replyMessage._id.toString(),
     };
   }
@@ -531,57 +538,6 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
 
   const temperature = groundedTemperature(setting?.temperature);
 
-  if (lowKnowledgeConfidence && isClearlyOutOfBusinessScope(input.message)) {
-    const scopedReply = buildOutOfScopeReply(input.message);
-    const scopedMessage = await createOutgoingAiReply({
-      tenantId: input.tenantId,
-      conversation,
-      channel: input.channel,
-      reply: scopedReply,
-      metadata: {
-        fastPath: "out_of_business_scope",
-        aiPolicy: {
-          turnCount: nextAiTurnCount,
-          clarificationCount,
-          repeatedUserCount,
-          lowKnowledgeConfidence: true,
-        },
-        knowledge: { enabled: knowledgeEnabled, confidence: knowledge?.confidence ?? 0, sourceCount: knowledge?.results.length ?? 0 },
-      },
-    });
-
-    conversation.aiTurnCount = nextAiTurnCount;
-    conversation.aiStatus = "active";
-    conversation.metadata = {
-      ...metadata,
-      aiPolicy: {
-        ...aiPolicy,
-        lastUserFingerprint: currentUserFingerprint,
-        lastAssistantFingerprint: fingerprint(scopedReply),
-        clarificationCount,
-        repeatedUserCount,
-        lastKnowledgeConfidence: knowledge?.confidence ?? null,
-        lastKnowledgeSourceCount: knowledge?.results.length ?? 0,
-        lastAiReplyAt: new Date().toISOString(),
-      },
-    };
-    await conversation.save();
-
-    void captureWorkflowIfReady({
-      tenantId: input.tenantId,
-      conversation,
-      userMessage: input.message,
-      aiReply: scopedReply,
-      confidence: knowledge?.confidence ?? null,
-    }).catch(() => undefined);
-
-    return {
-      reply: scopedReply,
-      conversationId: conversation._id.toString(),
-      confidence: knowledge?.confidence ?? 0,
-      messageId: scopedMessage._id.toString(),
-    };
-  }
 
   await assertAndReserveQuota(input.tenantId);
 
@@ -890,12 +846,6 @@ async function createOutgoingAiReply(input: {
   return message;
 }
 
-function isGreetingOnly(value: string) {
-  const text = fingerprint(value);
-  if (!text) return false;
-  return /^(السلام عليكم|سلام عليكم|سلام عليك|سلام|اهلا|اهلين|اهلا وسهلا|مرحبا|مرحبا بكم|هاي|هلو|اوكي|تمام|مساء الخير|صباح الخير|صباحو|مساء النور|hello|hi|hey|good morning|good afternoon|good evening|yo|sup)$/i.test(text);
-}
-
 function groundedTemperature(configured?: number | null) {
   if (typeof configured === "number" && Number.isFinite(configured)) return configured;
   return 0.6;
@@ -914,33 +864,6 @@ function sanitizeCustomerReply(value: string) {
 async function resolveTenantDisplayName(tenantId: string, fallback: string) {
   const tenant = await Tenant.findById(tenantId).select("name slug").lean();
   return tenant?.name || fallback || "ChatZi";
-}
-
-const GREETING_OPENERS = [
-  (name: string) => `أهلاً وسهلاً! 😊 أنا مساعد ${name}، كيف أقدر أخدمك اليوم؟`,
-  (name: string) => `مرحباً! يسعدني أساعدك. أنا من فريق ${name} — إيش تحتاج؟`,
-  (name: string) => `هلا هلا! 👋 أنا هنا من ${name}، قولي كيف أقدر أفيدك.`,
-  (name: string) => `وعليكم السلام ورحمة الله! أنا المساعد الذكي لـ ${name}، بخدمتك. 🙂`,
-  (name: string) => `أهلاً بك! شرفتنا. أنا مساعد ${name} — أقولي إيش تودّ تعرف أو تطلب؟`,
-];
-
-function buildWelcomeReply(companyName: string, personas: Array<any>) {
-  const opener = GREETING_OPENERS[Math.floor(Math.random() * GREETING_OPENERS.length)](companyName);
-  if (!personas.length) return opener;
-
-  const personaLines = personas
-    .slice(0, 5)
-    .map((persona) => `• ${persona.roleName}${persona.description ? ` — ${persona.description}` : ""}`)
-    .join("\n");
-
-  return [
-    opener,
-    "",
-    "عندنا كمان فريق متخصص يقدر يساعدك:",
-    personaLines,
-    "",
-    "اكتب سؤالك مباشرة وأنا هنا! 😊"
-  ].join("\n");
 }
 
 function enhanceQuestionWithAttachments(message: string, metadata?: Record<string, unknown>) {
@@ -1132,27 +1055,6 @@ async function resolveWorkflowRecipients(tenantId: string) {
   return [...new Set(users.map((user: any) => user.email).filter(Boolean))];
 }
 
-
-function isClearlyOutOfBusinessScope(value: string) {
-  const text = fingerprint(value);
-  if (!text) return false;
-
-  const businessTerms = /(سن|اسنان|ضرس|لثه|حجز|موعد|ميعاد|كشف|طبيب|دكتور|عياده|مركز|ابتسامه|زراعه|تقويم|تبييض|حشو|عصب|تركيبات|فينير|هوليوود|الم|نزيف|سعر|اسعار|خدمه|خدمات|عرض|عروض|دفع|فرع|عنوان|phone|appointment|booking|clinic|dent|dental|tooth|teeth|doctor|price|service|implant|whitening|braces)/i;
-  if (businessTerms.test(text)) return false;
-
-  return /(برمجه|بايثون|كود|html|css|javascript|طقس|درجه الحراره|توقعات الطقس|سماء|لون السماء|فيله|فيل|حيوان|حيوانات|بيض|اكل|طبخ|سياسه|رياضه|اخبار|programming|python|code|weather|temperature|sky|elephant|animal|egg|food|recipe|news|sports)/i.test(text);
-}
-
-function buildOutOfScopeReply(value: string) {
-  const text = fingerprint(value);
-  if (/(طقس|درجه الحراره|توقعات الطقس|weather|temperature)/i.test(text)) {
-    return "أعتذر، لا أستطيع عرض توقعات الطقس من داخل قاعدة معرفة هذا النشاط. أقدر أساعدك في خدمات المركز، الحجز، الأسعار المتاحة، أو أي استفسار يخص الأسنان.";
-  }
-  if (/(برمجه|بايثون|كود|html|css|javascript|programming|python|code)/i.test(text)) {
-    return "أعتذر، دوري هنا هو مساعدتك في خدمات هذا النشاط فقط، ولا أستطيع تعليم البرمجة أو كتابة أكواد. أقدر أساعدك في الحجز أو الاستفسار عن الخدمات والأسعار المتاحة.";
-  }
-  return "أعتذر، هذا السؤال خارج نطاق معلومات هذا النشاط. أقدر أساعدك في الخدمات، الحجز، الأسعار المتاحة، السياسات، أو الدعم الخاص بالمركز.";
-}
 
 function normalizeObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};

@@ -2,6 +2,8 @@ import crypto from "crypto";
 import { Types } from "mongoose";
 import { Bot, Conversation, Message, Ticket } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
+import { publishRealtimeEvent } from "@/lib/realtime";
+import { syncLeadFromTicket } from "@/lib/leads-from-tickets";
 
 export type TicketCategory =
   | "technical_support"
@@ -151,7 +153,23 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
     if (input.description) update.description = input.description;
 
     await existing.updateOne({ $set: update });
-    return Ticket.findById(existing._id);
+    const refreshed = await Ticket.findById(existing._id);
+    if (refreshed) {
+      await syncLeadFromTicket({ tenantId: input.tenantId, ticketId: refreshed._id.toString() }).catch(() => null);
+      await publishRealtimeEvent(input.tenantId, "ticket.updated", {
+        ticket: {
+          id: refreshed._id.toString(),
+          number: refreshed.number || 0,
+          subject: refreshed.subject || refreshed.title,
+          status: refreshed.status,
+          priority: refreshed.priority,
+          category: refreshed.category,
+          updatedAt: refreshed.updatedAt?.toISOString?.() || new Date().toISOString(),
+        },
+        conversation: { id: input.conversationId },
+      }).catch(() => undefined);
+    }
+    return refreshed;
   }
 
   const [counter, bot, lastMessages] = await Promise.all([
@@ -179,9 +197,10 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
       externalUserId: conversation.externalUserId,
     });
 
-  return Ticket.create({
+  const createdTicket = await Ticket.create({
     tenantId: input.tenantId,
     botId: input.botId,
+    contactId: conversation.contactId || undefined,
     conversationId: input.conversationId,
     number: counter + 1,
     subject,
@@ -201,6 +220,22 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
       }`,
     metadata: { ...(input.metadata || {}), issueFingerprint },
   });
+
+  await syncLeadFromTicket({ tenantId: input.tenantId, ticketId: createdTicket._id.toString() }).catch(() => null);
+  await publishRealtimeEvent(input.tenantId, "ticket.created", {
+    ticket: {
+      id: createdTicket._id.toString(),
+      number: createdTicket.number || 0,
+      subject: createdTicket.subject || createdTicket.title,
+      status: createdTicket.status,
+      priority: createdTicket.priority,
+      category: createdTicket.category,
+      createdAt: createdTicket.createdAt?.toISOString?.() || new Date().toISOString(),
+    },
+    conversation: { id: input.conversationId },
+  }).catch(() => undefined);
+
+  return createdTicket;
 }
 
 

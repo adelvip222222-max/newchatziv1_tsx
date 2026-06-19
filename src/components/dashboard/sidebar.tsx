@@ -6,6 +6,7 @@ import {
   BookOpenText,
   Brain,
   ContactRound,
+  UserPlus,
   CreditCard,
   Gauge,
   Inbox,
@@ -28,6 +29,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { usePathname, useRouter } from "next/navigation";
 import { SignOutButton } from "@/components/dashboard/sign-out";
+import { SidebarCountsPanel } from "@/components/dashboard/sidebar-counts";
 
 declare global {
   interface BeforeInstallPromptEvent extends Event {
@@ -60,6 +62,7 @@ export function Sidebar({ role }: { role?: string }) {
     { href: "/dashboard", label: t.nav.home, icon: Gauge },
     { href: "/dashboard/conversations", label: t.nav.conversations, icon: MessageSquare },
     { href: "/dashboard/tickets", label: locale === "ar" ? "التذاكر" : "Tickets", icon: ClipboardCheck },
+    { href: "/dashboard/leads", label: locale === "ar" ? "العملاء المحتملون" : "Leads", icon: UserPlus },
     { href: "/dashboard/contacts", label: locale === "ar" ? "جهات الاتصال" : "Contacts", icon: ContactRound },
     { href: "/dashboard/ai-settings", label: t.nav.aiSettings, icon: Brain },
     ...(role === "admin" ? [{ href: "/admin/ai-models", label: locale === "ar" ? "مفاتيح AI" : "AI API Keys", icon: KeyRound }] : []),
@@ -78,6 +81,7 @@ export function Sidebar({ role }: { role?: string }) {
     { href: "/dashboard", label: t.nav.home, icon: Gauge },
     { href: "/dashboard/conversations", label: t.nav.conversations, icon: MessageSquare },
     { href: "/dashboard/tickets", label: locale === "ar" ? "التذاكر" : "Tickets", icon: ClipboardCheck },
+    { href: "/dashboard/leads", label: locale === "ar" ? "العملاء المحتملون" : "Leads", icon: UserPlus },
     { href: "/dashboard/contacts", label: locale === "ar" ? "جهات الاتصال" : "Contacts", icon: ContactRound },
     { href: "/dashboard/channels", label: t.nav.channels, icon: PlugZap },
     { href: "/dashboard/knowledge", label: t.nav.knowledge, icon: BookOpenText },
@@ -168,6 +172,7 @@ export function Sidebar({ role }: { role?: string }) {
                 </Link>
               );
             })}
+            <SidebarCountsPanel collapsed={collapsed} />
           </nav>
         </div>
 

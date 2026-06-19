@@ -38,7 +38,7 @@ const nextConfig: NextConfig = {
     ];
   },
   webpack: (config) => config,
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: ["pdf-parse", "exceljs", "mammoth", "unzipper", "bluebird"],
 };
 
 export default nextConfig;
