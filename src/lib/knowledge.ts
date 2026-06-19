@@ -1,6 +1,4 @@
 import crypto from "crypto";
-import ExcelJS from "exceljs";
-import mammoth from "mammoth";
 import OpenAI from "openai";
 import { Types } from "mongoose";
 import {
@@ -783,11 +781,13 @@ async function extractKnowledgeText(input: CreateKnowledgeInput) {
   }
 
   if (input.sourceType === "docx") {
+    const mammoth = await import("mammoth");
     const result = await mammoth.extractRawText({ buffer: input.file.buffer });
     return { text: result.value || "", pageCount: 1 };
   }
 
   if (input.sourceType === "excel") {
+    const ExcelJS = await import("exceljs");
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(input.file.buffer as unknown as ArrayBuffer);
     const rows: string[] = [];
@@ -847,8 +847,8 @@ function stripHtml(value: string) {
 function splitIntoChunks(text: string) {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks: string[] = [];
-  const chunkSize = 420;
-  const overlap = 70;
+  const chunkSize = Number(process.env.KNOWLEDGE_CHUNK_WORDS || 360);
+  const overlap = Number(process.env.KNOWLEDGE_CHUNK_OVERLAP_WORDS || 50);
   for (let start = 0; start < words.length; start += chunkSize - overlap) {
     const chunk = words.slice(start, start + chunkSize).join(" ").trim();
     if (chunk.length > 80) chunks.push(chunk);

@@ -6,6 +6,7 @@ import { initializeAdapters } from "./providers";
 import { createRedisConnection } from "@/lib/redis-connection";
 import { recordFailedJob } from "@/lib/job-monitoring";
 import { logger } from "@/lib/logger";
+import { publishRealtimeEvent } from "@/lib/realtime";
 
 const connection = createRedisConnection("outbound-worker");
 
@@ -52,9 +53,28 @@ export const outboundWorker = new Worker(
       delivery.externalMessageId = result.externalMessageId;
       await delivery.save();
 
-      await Message.findByIdAndUpdate(delivery.messageId, {
-        deliveryStatus: "sent",
-        externalMessageId: result.externalMessageId
+      const sentAt = new Date();
+      await Message.findOneAndUpdate(
+        { _id: delivery.messageId, tenantId: delivery.tenantId },
+        {
+          deliveryStatus: "sent",
+          externalMessageId: result.externalMessageId,
+          $set: {
+            "metadata.trace.outboundSentAt": sentAt.toISOString(),
+            "metadata.trace.outboundLatencyMs": delivery.createdAt
+              ? sentAt.getTime() - new Date(delivery.createdAt).getTime()
+              : undefined,
+          },
+        }
+      );
+
+      await publishRealtimeEvent(delivery.tenantId.toString(), "delivery.updated", {
+        messageId: delivery.messageId.toString(),
+        deliveryId: delivery._id.toString(),
+        status: "sent",
+        provider,
+        externalMessageId: result.externalMessageId,
+        sentAt: sentAt.toISOString(),
       });
       logger.info("outbound.sent", {
         deliveryId: delivery._id.toString(),
@@ -67,14 +87,12 @@ export const outboundWorker = new Worker(
       delivery.errorMessage = result.error?.message || (typeof result.error === 'string' ? result.error : JSON.stringify(result.error)) || "Unknown error";
       await delivery.save();
 
-      await Message.findByIdAndUpdate(delivery.messageId, {
-        deliveryStatus: "failed"
-      });
+      await Message.findOneAndUpdate({ _id: delivery.messageId, tenantId: delivery.tenantId }, { deliveryStatus: "failed", $set: { "metadata.trace.outboundFailedAt": new Date().toISOString() } });
 
       throw new Error(delivery.errorMessage || "Unknown error"); // Trigger BullMQ retry
     }
   },
-  { connection: connection as any }
+  { connection: connection as any, concurrency: Number(process.env.OUTBOUND_WORKER_CONCURRENCY || 8) }
 );
 
 outboundWorker.on("failed", (job, err) => {

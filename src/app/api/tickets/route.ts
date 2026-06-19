@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import { Ticket } from "@/lib/models";
+import { syncLeadFromTicket } from "@/lib/leads-from-tickets";
+import { publishRealtimeEvent } from "@/lib/realtime";
 import { requireAuth } from "@/server/auth/guards";
 
 export async function GET(req: NextRequest) {
@@ -56,5 +58,18 @@ export async function POST(req: NextRequest) {
     tags: body.tags || [],
     customFields: body.customFields || {}
   });
+  await syncLeadFromTicket({ tenantId: session.user.tenantId, ticketId: ticket._id.toString() }).catch(() => null);
+  await publishRealtimeEvent(session.user.tenantId, "ticket.created", {
+    ticket: {
+      id: ticket._id.toString(),
+      number: ticket.number || 0,
+      subject: ticket.subject || ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      category: ticket.category,
+      createdAt: ticket.createdAt?.toISOString?.() || new Date().toISOString(),
+    },
+    conversation: { id: ticket.conversationId?.toString?.() || "" },
+  }).catch(() => undefined);
   return NextResponse.json({ ticket }, { status: 201 });
 }

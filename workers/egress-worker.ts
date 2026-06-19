@@ -6,6 +6,7 @@ import { recordFailedJob } from "../src/lib/job-monitoring";
 import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { queueOutboundMessage } from "../src/server/channels/outboundQueue";
+import { publishRealtimeEvent } from "../src/lib/realtime";
 
 const workerName = "worker-egress";
 const connection = createRedisConnection(workerName);
@@ -28,7 +29,18 @@ export const egressWorker = new Worker(
 
     const channelProvider = provider || conversation.provider || conversation.channel;
     if (["website", "webhook", "api"].includes(channelProvider)) {
-      await Message.updateOne({ _id: message._id, tenantId }, { $set: { deliveryStatus: "sent" } });
+      const sentAt = new Date().toISOString();
+      await Message.updateOne(
+        { _id: message._id, tenantId },
+        { $set: { deliveryStatus: "sent", "metadata.trace.egressCompletedAt": sentAt, "metadata.trace.outboundSentAt": sentAt } }
+      );
+      await publishRealtimeEvent(tenantId, "delivery.updated", {
+        messageId: message._id.toString(),
+        conversationId: conversation._id.toString(),
+        status: "sent",
+        provider: channelProvider,
+        sentAt,
+      });
       return { queued: false, reason: "internal_channel" };
     }
 
@@ -49,6 +61,8 @@ export const egressWorker = new Worker(
       });
       throw new Error("Outbound channel not found");
     }
+
+    await Message.updateOne({ _id: message._id, tenantId }, { $set: { deliveryStatus: "sending", "metadata.trace.egressStartedAt": new Date().toISOString() } });
 
     const result = await queueOutboundMessage({
       tenantId,

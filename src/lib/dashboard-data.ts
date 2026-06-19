@@ -317,6 +317,69 @@ export async function getDashboardChannels(tenantId: string) {
   });
 }
 
+export async function getTicketsPage(tenantId: string, options: { page?: number; limit?: number; status?: string; category?: string; q?: string } = {}) {
+  await connectToDatabase();
+  const page = Math.max(1, Number(options.page || 1));
+  const limit = Math.min(50, Math.max(5, Number(options.limit || 15)));
+  const skip = (page - 1) * limit;
+  const filter: Record<string, any> = { tenantId };
+  if (options.status) filter.status = options.status;
+  if (options.category) filter.category = options.category;
+  if (options.q?.trim()) {
+    const q = options.q.trim();
+    filter.$or = [
+      { title: { $regex: q, $options: "i" } },
+      { subject: { $regex: q, $options: "i" } },
+      { description: { $regex: q, $options: "i" } },
+      { requesterExternalId: { $regex: q, $options: "i" } },
+      { category: { $regex: q, $options: "i" } },
+    ];
+  }
+
+  const [tickets, total, openCount, newCount, pendingCount, resolvedCount] = await Promise.all([
+    Ticket.find(filter).sort({ updatedAt: -1, createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Ticket.countDocuments(filter),
+    Ticket.countDocuments({ tenantId, status: { $in: ["open", "in_progress", "pending"] } }),
+    Ticket.countDocuments({ tenantId, status: { $in: ["open", "in_progress", "pending"] }, createdAt: { $gte: new Date(new Date().setHours(0,0,0,0)) } }),
+    Ticket.countDocuments({ tenantId, status: "pending" }),
+    Ticket.countDocuments({ tenantId, status: { $in: ["resolved", "closed"] } }),
+  ]);
+
+  const rows = await Promise.all(
+    tickets.map(async (ticket) => {
+      const [bot, conversation] = await Promise.all([
+        ticket.botId ? Bot.findById(ticket.botId).lean() : null,
+        ticket.conversationId ? Conversation.findById(ticket.conversationId).lean() : null,
+      ]);
+      return {
+        id: ticket._id.toString(),
+        number: ticket.number || 0,
+        subject: ticket.subject || ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category || "general",
+        channel: ticket.channel || conversation?.channel || "-",
+        requesterExternalId: ticket.requesterExternalId || conversation?.externalUserId || "-",
+        botName: bot?.name || "-",
+        conversationId: ticket.conversationId?.toString() || "",
+        conversationStatus: conversation?.status || "-",
+        triggerReason: ticket.triggerReason || "",
+        createdAt: ticket.createdAt?.toISOString() || "",
+        updatedAt: ticket.updatedAt?.toISOString() || "",
+      };
+    })
+  );
+
+  return {
+    tickets: rows,
+    total,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    stats: { openCount, newCount, pendingCount, resolvedCount },
+  };
+}
+
 export async function getTickets(tenantId: string) {
   await connectToDatabase();
   const tickets = await Ticket.find({ tenantId }).sort({ updatedAt: -1 }).limit(100).lean();

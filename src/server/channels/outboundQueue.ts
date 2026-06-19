@@ -19,12 +19,22 @@ type OutboundMessagePayload = {
 
 const retryDelayMs = 60_000;
 
+function outboundJobId(payload: OutboundMessagePayload) {
+  return ["outbound", payload.deliveryId, payload.provider]
+    .filter(Boolean)
+    .join("__")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 180);
+}
+
 async function addOutboundJob(payload: OutboundMessagePayload) {
   await outboundQueue.add("send", payload, {
     attempts: 3,
-    backoff: { type: "exponential", delay: 1000 },
-    removeOnComplete: true,
-    removeOnFail: false
+    priority: 1,
+    jobId: outboundJobId(payload),
+    backoff: { type: "exponential", delay: Number(process.env.OUTBOUND_JOB_BACKOFF_MS || 1000) },
+    removeOnComplete: { count: 2000, age: 24 * 60 * 60 },
+    removeOnFail: { count: 5000, age: 7 * 24 * 60 * 60 }
   });
 }
 
@@ -39,7 +49,9 @@ export async function queueOutboundMessage({
   externalUserId,
   externalThreadId
 }: any) {
-  // 1. Create delivery record
+  // 1. Create delivery record and mark message as queued before the channel adapter sends it.
+  await Message.findOneAndUpdate({ _id: messageId, tenantId }, { deliveryStatus: "queued" });
+
   const delivery = await MessageDelivery.create({
     tenantId,
     messageId,

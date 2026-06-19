@@ -7,6 +7,8 @@ export const REALTIME_EVENTS = {
   CONVERSATION_ASSIGNED: "conversation.assigned",
   CONVERSATION_DELETED: "conversation.deleted",
   NOTIFICATION_CREATED: "notification.created",
+  TICKET_CREATED: "ticket.created",
+  TICKET_UPDATED: "ticket.updated",
   DELIVERY_UPDATED: "delivery.updated",
   INBOX_SNAPSHOT: "inbox.snapshot",
   HEARTBEAT: "heartbeat",

@@ -61,6 +61,9 @@ export const aiWorker = new Worker(
     const attachments = Array.isArray(message.attachments) ? message.attachments : [];
     const attachmentPrompt = describeMessageAttachments(attachments);
 
+    const aiStartedAt = new Date();
+    await Message.updateOne({ _id: messageId, tenantId, conversationId }, { $set: { "metadata.trace.aiStartedAt": aiStartedAt.toISOString() } });
+
     const result = await generateAiReply({
       tenantId,
       botId,
@@ -86,11 +89,12 @@ export const aiWorker = new Worker(
       },
       {
         ...defaultJobOptions,
-        jobId: makeQueueJobId("egress", result.messageId)
+        jobId: makeQueueJobId("egress", result.messageId),
+        priority: 1
       }
     );
 
-    logger.info("ai.reply_generated", { tenantId, conversationId, messageId: result.messageId, traceId });
+    logger.info("ai.reply_generated", { tenantId, conversationId, messageId: result.messageId, traceId, aiLatencyMs: Date.now() - aiStartedAt.getTime() });
     return { generated: true, messageId: result.messageId };
   },
   { connection: connection as any, concurrency: Number(process.env.AI_WORKER_CONCURRENCY || 3) }

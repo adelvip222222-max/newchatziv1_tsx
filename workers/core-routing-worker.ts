@@ -97,7 +97,8 @@ export const coreRoutingWorker = new Worker(
       },
       {
         ...aiJobOptions,
-        jobId: makeQueueJobId("ai", messageId)
+        jobId: makeQueueJobId("ai", messageId),
+        priority: 1
       }
     );
 

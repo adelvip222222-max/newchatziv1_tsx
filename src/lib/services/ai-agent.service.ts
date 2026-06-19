@@ -15,13 +15,8 @@ export class AiAgentService {
     const personas = await AiPersona.find({ tenantId, isActive: true });
     
     if (personas.length === 0) {
-      const conversation = await Conversation.findOne({ _id: conversationId, tenantId });
-      if (!conversation) throw new Error("Conversation not found");
-      return await this.sendSystemMessage(
-        conversation,
-        tenantId,
-        "أهلاً! أنا المساعد الافتراضي، كيف أقدر أساعدك اليوم؟"
-      );
+      // No hardcoded greeting here. The AI fast-intent responder generates the customer-facing greeting after the customer writes first.
+      return null;
     }
 
     const conversation = await Conversation.findOne({ _id: conversationId, tenantId });

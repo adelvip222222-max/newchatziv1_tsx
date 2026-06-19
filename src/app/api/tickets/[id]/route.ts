@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectToDatabase } from "@/lib/mongodb";
 import { Ticket } from "@/lib/models";
+import { syncLeadFromTicket } from "@/lib/leads-from-tickets";
+import { publishRealtimeEvent } from "@/lib/realtime";
 import { requireAuth } from "@/server/auth/guards";
 
 type Params = { params: Promise<{ id: string }> };
@@ -44,6 +46,19 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (body.status === "resolved" || body.status === "closed") updates.resolvedAt = new Date();
   const ticket = await Ticket.findOneAndUpdate({ _id: id, tenantId: session.user.tenantId }, { $set: updates }, { new: true });
   if (!ticket) return NextResponse.json({ error: "Ticket not found." }, { status: 404 });
+  await syncLeadFromTicket({ tenantId: session.user.tenantId, ticketId: ticket._id.toString() }).catch(() => null);
+  await publishRealtimeEvent(session.user.tenantId, "ticket.updated", {
+    ticket: {
+      id: ticket._id.toString(),
+      number: ticket.number || 0,
+      subject: ticket.subject || ticket.title,
+      status: ticket.status,
+      priority: ticket.priority,
+      category: ticket.category,
+      updatedAt: ticket.updatedAt?.toISOString?.() || new Date().toISOString(),
+    },
+    conversation: { id: ticket.conversationId?.toString?.() || "" },
+  }).catch(() => undefined);
   return NextResponse.json({ ticket });
 }
 
