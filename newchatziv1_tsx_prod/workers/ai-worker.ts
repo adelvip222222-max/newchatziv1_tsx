@@ -7,7 +7,12 @@ import { recordFailedJob } from "../src/lib/job-monitoring";
 import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { generateAiReply } from "../src/lib/ai";
-import { publishRealtimeEvent } from "../src/lib/realtime";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "../src/lib/latency-trace";
 
 const workerName = "worker-ai";
 const connection = createRedisConnection(workerName);
@@ -44,7 +49,7 @@ export const aiWorker = new Worker(
       conversation.metadata = {
         ...(conversation.metadata || {}),
         aiPolicy: {
-          ...((conversation.metadata as any)?.aiPolicy || {}),
+          ...(conversation.metadata?.aiPolicy || {}),
           clarificationCount: 0,
           repeatedUserCount: 0,
           handoffRequested: false,
@@ -62,6 +67,14 @@ export const aiWorker = new Worker(
     const attachments = Array.isArray(message.attachments) ? message.attachments : [];
     const attachmentPrompt = describeMessageAttachments(attachments);
 
+    const aiStartedAt = new Date();
+    let trace = markLatencyTrace(
+      mergeLatencyTrace((job.data as any).trace, (message.metadata as any)?.trace, { traceId }),
+      "aiStartedAt",
+      aiStartedAt
+    );
+    await Message.updateOne({ _id: messageId, tenantId, conversationId }, { $set: latencyTraceMongoSet(trace) });
+
     const result = await generateAiReply({
       tenantId,
       botId,
@@ -69,56 +82,25 @@ export const aiWorker = new Worker(
       externalUserId: conversation.externalUserId,
       channel: provider || conversation.provider || conversation.channel,
       message: message.content || attachmentPrompt || "أرسل العميل مرفقًا.",
-      metadata: { traceId, sourceMessageId: messageId, attachments }
+      metadata: { traceId, sourceMessageId: messageId, attachments, trace }
     });
 
     if (!result.reply || !result.messageId) {
+      trace = markLatencyTrace(trace, "aiCompletedAt");
+      await Message.updateOne({ _id: messageId, tenantId, conversationId }, { $set: latencyTraceMongoSet(trace) });
       return { generated: false, reason: "empty_reply" };
     }
 
-    // ── Realtime push (safety net) ─────────────────────────────────────────────
-    // The Mastra persistResultStep already publishes. This is a second guarantee
-    // that works for legacy mode and as a fallback if the Mastra publish fails.
-    // Fire-and-forget: never block the egress queue for a realtime event.
-    void (async () => {
-      try {
-        const [savedMessage, freshConversation] = await Promise.all([
-          Message.findById(result.messageId).select("content deliveryStatus createdAt attachments provider").lean(),
-          Conversation.findById(conversationId).select("channel provider lastMessageAt aiStatus").lean(),
-        ]);
-        if (savedMessage) {
-          await publishRealtimeEvent(tenantId, "message.created", {
-            message: {
-              id: result.messageId,
-              conversationId,
-              content: (savedMessage as any).content || result.reply,
-              direction: "outgoing",
-              sender: "assistant",
-              senderType: "assistant",
-              provider: (savedMessage as any).provider || provider || (freshConversation as any)?.channel || "",
-              deliveryStatus: (savedMessage as any).deliveryStatus || "sent",
-              createdAt: (savedMessage as any).createdAt?.toISOString?.() || new Date().toISOString(),
-              attachments: [],
-            },
-            conversation: {
-              id: conversationId,
-              aiStatus: (freshConversation as any)?.aiStatus || "active",
-              lastMessage: result.reply.slice(0, 220),
-              lastMessageAt: (freshConversation as any)?.lastMessageAt?.toISOString?.() || new Date().toISOString(),
-              channel: (freshConversation as any)?.channel || "",
-              provider: (freshConversation as any)?.provider || provider || "",
-            },
-          });
-        }
-      } catch (realtimeError) {
-        logger.warn("ai.realtime_publish_failed", {
-          tenantId,
-          conversationId,
-          messageId: result.messageId,
-          error: realtimeError instanceof Error ? realtimeError.message : "unknown",
-        });
-      }
-    })();
+    const assistantMessage = await Message.findOne({
+      _id: result.messageId,
+      tenantId,
+      conversationId,
+    }).select("metadata").lean();
+
+    trace = markLatencyTrace(
+      mergeLatencyTrace(trace, (assistantMessage?.metadata as any)?.trace),
+      "aiCompletedAt"
+    );
 
     await egressQueue.add(
       "prepare-outbound",
@@ -127,18 +109,33 @@ export const aiWorker = new Worker(
         conversationId,
         messageId: result.messageId,
         provider: provider || conversation.provider || conversation.channel,
-        traceId
+        traceId,
+        trace
       },
       {
         ...defaultJobOptions,
-        jobId: makeQueueJobId("egress", result.messageId)
+        jobId: makeQueueJobId("egress", result.messageId),
+        priority: 1
       }
     );
 
-    logger.info("ai.reply_generated", { tenantId, conversationId, messageId: result.messageId, traceId });
+    trace = markLatencyTrace(trace, "egressQueuedAt");
+    await Promise.all([
+      Message.updateOne({ _id: messageId, tenantId, conversationId }, { $set: latencyTraceMongoSet(trace) }),
+      Message.updateOne({ _id: result.messageId, tenantId, conversationId }, { $set: latencyTraceMongoSet(trace) }),
+    ]);
+
+    logger.info("ai.reply_generated", {
+      tenantId,
+      conversationId,
+      messageId: result.messageId,
+      traceId,
+      aiLatencyMs: Date.now() - aiStartedAt.getTime(),
+      latency: latencyTraceSummary(trace),
+    });
     return { generated: true, messageId: result.messageId };
   },
-  { connection: connection as any, concurrency: Number(process.env.AI_WORKER_CONCURRENCY || 3) }
+  { connection: connection as any, concurrency: Number(process.env.AI_WORKER_CONCURRENCY || 4) }
 );
 
 aiWorker.on("failed", (job, error) => {

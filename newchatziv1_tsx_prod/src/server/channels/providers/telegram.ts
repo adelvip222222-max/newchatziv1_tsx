@@ -26,7 +26,7 @@ function telegramText(msg: any) {
 }
 
 function resolveTelegramToken(channel: ChannelDocument) {
-  const encrypted = (channel.config as any)?.botTokenEncrypted;
+  const encrypted = channel.config?.botTokenEncrypted;
   const decrypted = decryptSecret(typeof encrypted === "string" ? encrypted : "");
   return decrypted || process.env.TELEGRAM_BOT_TOKEN || "";
 }
@@ -36,10 +36,10 @@ export const telegramAdapter: ProviderAdapter = {
 
   async verifyWebhook(request: Request, channel?: ChannelDocument): Promise<boolean> {
     const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-    if (!channel || !channel.config || !(channel.config as any).webhookSecret) {
+    if (!channel || !channel.config || !channel.config.webhookSecret) {
       return process.env.NODE_ENV !== "production";
     }
-    return secret === (channel.config as any).webhookSecret;
+    return secret === channel.config.webhookSecret;
   },
 
   async normalizeIncoming(payload: any, channel?: ChannelDocument): Promise<NormalizedIncomingMessage[]> {
@@ -92,7 +92,7 @@ export const telegramAdapter: ProviderAdapter = {
   },
 
   async getHealth(channel: ChannelDocument) {
-    if (!channel.config || !(channel.config as any).botTokenEncrypted) return { status: "unconfigured" };
+    if (!channel.config || !channel.config.botTokenEncrypted) return { status: "unconfigured" };
     return { status: "healthy" };
   }
 };

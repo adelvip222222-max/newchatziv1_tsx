@@ -88,28 +88,17 @@ async function provisionOAuthUser(nextAuthUser: any, profile: any) {
     isActive: true
   });
 
-  let freePlan = await BillingPlan.findOne({ name: /free/i });
-  if (!freePlan) {
-    freePlan = await BillingPlan.create({
-      name: "Free",
-      description: "Free base plan",
-      priceCents: 0,
-      currency: "usd",
-      interval: "month",
-      aiMessageLimit: 100,
-      createdByAdmin: true,
-      isActive: true
+  const freePlan = await BillingPlan.findOne({ name: "Free" });
+  if (freePlan) {
+    await TenantSubscription.create({
+      tenantId: tenant._id,
+      planId: freePlan._id,
+      status: "active",
+      monthlyMessageLimit: freePlan.aiMessageLimit,
+      usedMessages: 0,
+      extraMessageCredits: 0
     });
   }
-
-  await TenantSubscription.create({
-    tenantId: tenant._id,
-    planId: freePlan._id,
-    status: "active",
-    monthlyMessageLimit: freePlan.aiMessageLimit,
-    usedMessages: 0,
-    extraMessageCredits: 0
-  });
 
   logSystemEvent({ eventType: "login_success", email, userId: user._id.toString(), details: { method: "oauth_google_new" }});
 

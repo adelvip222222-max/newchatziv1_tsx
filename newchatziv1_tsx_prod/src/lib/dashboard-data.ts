@@ -36,7 +36,7 @@ export async function getTenantSummary(tenantId: string) {
 export async function getBots(tenantId: string) {
   await connectToDatabase();
   const bots = await Bot.find({ tenantId }).sort({ createdAt: -1 }).lean();
-  return bots.map((bot: any) => ({
+  return bots.map((bot) => ({
     id: bot._id.toString(),
     name: bot.name,
     avatar: bot.avatar || "",
@@ -63,7 +63,7 @@ export async function getConversations(tenantId: string) {
   await connectToDatabase();
   const conversations = await Conversation.find({ tenantId }).sort({ updatedAt: -1 }).limit(50).lean();
   return Promise.all(
-    conversations.map(async (conversation: any) => {
+    conversations.map(async (conversation) => {
       const bot = await Bot.findById(conversation.botId).lean();
       const lastMessage = await Message.findOne({ conversationId: conversation._id }).sort({ createdAt: -1 }).lean();
       return {
@@ -106,11 +106,11 @@ export async function getConversationDetail(tenantId: string, id: string) {
           category: ticket.category || "general"
         }
       : null,
-    messages: messages.map((message: any) => ({
+    messages: messages.map((message) => ({
       id: message._id.toString(),
       sender: message.sender,
       content: message.content,
-      attachments: (message.attachments || []).map((attachment: any) => ({
+      attachments: (message.attachments || []).map((attachment) => ({
         id: attachment.id || "",
         type: attachment.type || "file",
         key: attachment.key || "",
@@ -133,8 +133,8 @@ export async function getAiSettings(tenantId: string) {
     AiModel.find({ isActive: true }).sort({ isDefault: -1, createdAt: -1 }).lean()
   ]);
   return {
-    bots: bots.map((bot: any) => ({ id: bot.id, name: bot.name })),
-    aiModels: aiModels.map((item: any) => ({
+    bots: bots.map((bot) => ({ id: bot.id, name: bot.name })),
+    aiModels: aiModels.map((item) => ({
       id: item._id.toString(),
       name: item.name,
       provider: item.provider,
@@ -197,7 +197,7 @@ export async function getChannelPageData(tenantId: string, type: string) {
   }
 
   return {
-    bots: bots.map((bot: any) => ({ id: bot.id, name: bot.name })),
+    bots: bots.map((bot) => ({ id: bot.id, name: bot.name })),
     initial: channel
       ? {
           botId: channel.botId?.toString() || "",
@@ -206,7 +206,7 @@ export async function getChannelPageData(tenantId: string, type: string) {
           config: safeConfig
         }
       : undefined,
-    logs: logs.map((log: any) => ({
+    logs: logs.map((log) => ({
       id: log._id.toString(),
       status: log.status,
       error: log.error || "",
@@ -219,7 +219,7 @@ export async function getDashboardActivity(tenantId: string) {
   await connectToDatabase();
   
   // Last 7 days chart data
-  const chartData: any[] = [];
+  const chartData = [];
   const today = new Date();
   today.setHours(23, 59, 59, 999);
   
@@ -248,7 +248,7 @@ export async function getDashboardActivity(tenantId: string) {
     .lean();
 
   const recentList = await Promise.all(
-    recentConversations.map(async (conversation: any) => {
+    recentConversations.map(async (conversation) => {
       const bot = await Bot.findById(conversation.botId).lean();
       const lastMessage = await Message.findOne({ conversationId: conversation._id })
         .sort({ createdAt: -1 })
@@ -271,7 +271,7 @@ export async function getDashboardActivity(tenantId: string) {
 export async function getAvailableAiModels() {
   await connectToDatabase();
   const models = await AiModel.find({ isActive: true }).sort({ isDefault: -1, createdAt: -1 }).lean();
-  return models.map((m: any) => ({
+  return models.map((m) => ({
     id: m._id.toString(),
     name: m.name,
     provider: m.provider
@@ -298,7 +298,7 @@ export async function getPersonas(tenantId: string) {
 export async function getDashboardChannels(tenantId: string) {
   await connectToDatabase();
   const channels = await Channel.find({ tenantId }).lean();
-  return channels.map((c: any) => {
+  return channels.map((c) => {
     let endpoint = "/api/webhook";
     if (c.type === "whatsapp") endpoint = "/v1/wa/webhook";
     else if (c.type === "facebook") endpoint = "/v1/fb/webhook";
@@ -317,12 +317,75 @@ export async function getDashboardChannels(tenantId: string) {
   });
 }
 
+export async function getTicketsPage(tenantId: string, options: { page?: number; limit?: number; status?: string; category?: string; q?: string } = {}) {
+  await connectToDatabase();
+  const page = Math.max(1, Number(options.page || 1));
+  const limit = Math.min(50, Math.max(5, Number(options.limit || 10)));
+  const skip = (page - 1) * limit;
+  const filter: Record<string, any> = { tenantId };
+  if (options.status) filter.status = options.status;
+  if (options.category) filter.category = options.category;
+  if (options.q?.trim()) {
+    const q = options.q.trim();
+    filter.$or = [
+      { title: { $regex: q, $options: "i" } },
+      { subject: { $regex: q, $options: "i" } },
+      { description: { $regex: q, $options: "i" } },
+      { requesterExternalId: { $regex: q, $options: "i" } },
+      { category: { $regex: q, $options: "i" } },
+    ];
+  }
+
+  const [tickets, total, openCount, newCount, pendingCount, resolvedCount] = await Promise.all([
+    Ticket.find(filter).sort({ updatedAt: -1, createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Ticket.countDocuments(filter),
+    Ticket.countDocuments({ tenantId, status: { $in: ["open", "in_progress", "pending"] } }),
+    Ticket.countDocuments({ tenantId, status: { $in: ["open", "in_progress", "pending"] }, createdAt: { $gte: new Date(new Date().setHours(0,0,0,0)) } }),
+    Ticket.countDocuments({ tenantId, status: "pending" }),
+    Ticket.countDocuments({ tenantId, status: { $in: ["resolved", "closed"] } }),
+  ]);
+
+  const rows = await Promise.all(
+    tickets.map(async (ticket) => {
+      const [bot, conversation] = await Promise.all([
+        ticket.botId ? Bot.findById(ticket.botId).lean() : null,
+        ticket.conversationId ? Conversation.findById(ticket.conversationId).lean() : null,
+      ]);
+      return {
+        id: ticket._id.toString(),
+        number: ticket.number || 0,
+        subject: ticket.subject || ticket.title,
+        status: ticket.status,
+        priority: ticket.priority,
+        category: ticket.category || "general",
+        channel: ticket.channel || conversation?.channel || "-",
+        requesterExternalId: ticket.requesterExternalId || conversation?.externalUserId || "-",
+        botName: bot?.name || "-",
+        conversationId: ticket.conversationId?.toString() || "",
+        conversationStatus: conversation?.status || "-",
+        triggerReason: ticket.triggerReason || "",
+        createdAt: ticket.createdAt?.toISOString() || "",
+        updatedAt: ticket.updatedAt?.toISOString() || "",
+      };
+    })
+  );
+
+  return {
+    tickets: rows,
+    total,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    stats: { openCount, newCount, pendingCount, resolvedCount },
+  };
+}
+
 export async function getTickets(tenantId: string) {
   await connectToDatabase();
   const tickets = await Ticket.find({ tenantId }).sort({ updatedAt: -1 }).limit(100).lean();
 
   return Promise.all(
-    tickets.map(async (ticket: any) => {
+    tickets.map(async (ticket) => {
       const [bot, conversation] = await Promise.all([
         ticket.botId ? Bot.findById(ticket.botId).lean() : null,
         ticket.conversationId ? Conversation.findById(ticket.conversationId).lean() : null
@@ -378,11 +441,11 @@ export async function getTicketDetail(tenantId: string, id: string) {
     aiSummary: ticket.aiSummary || "",
     createdAt: ticket.createdAt?.toISOString() || "",
     updatedAt: ticket.updatedAt?.toISOString() || "",
-    messages: messages.map((message: any) => ({
+    messages: messages.map((message) => ({
       id: message._id.toString(),
       sender: message.sender,
       content: message.content,
-      attachments: (message.attachments || []).map((attachment: any) => ({
+      attachments: (message.attachments || []).map((attachment) => ({
         id: attachment.id || "",
         type: attachment.type || "file",
         key: attachment.key || "",

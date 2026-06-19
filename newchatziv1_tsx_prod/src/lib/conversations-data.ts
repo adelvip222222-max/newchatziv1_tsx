@@ -1,4 +1,4 @@
-import { FilterQuery, Types, isValidObjectId } from "mongoose";
+import { FilterQuery, Types } from "mongoose";
 import { connectToDatabase } from "@/lib/mongodb";
 import { Contact, Conversation, Message } from "@/lib/models";
 
@@ -81,7 +81,7 @@ export async function listConversationsForTenant(tenantId: string, filters: Conv
     ? await Message.aggregate([
         {
           $match: {
-            tenantId: isValidObjectId(tenantId) ? new (Types.ObjectId as any)(tenantId) : tenantId,
+            tenantId: Types.ObjectId.isValid(tenantId) ? new Types.ObjectId(tenantId) : tenantId,
             conversationId: { $in: conversationsMissingPreview.map((conversation) => conversation._id) },
           },
         },
@@ -151,7 +151,7 @@ export async function listConversationsForTenant(tenantId: string, filters: Conv
 export async function getConversationDetailForTenant(tenantId: string, conversationId: string) {
   await connectToDatabase();
 
-  if (!isValidObjectId(conversationId)) return null;
+  if (!Types.ObjectId.isValid(conversationId)) return null;
 
   const conversation = await Conversation.findOne({ _id: conversationId, tenantId })
     .populate("contactId", "name email phone avatarUrl company")
@@ -197,7 +197,7 @@ export async function getConversationDetailForTenant(tenantId: string, conversat
 export async function listMessagesForConversation(tenantId: string, conversationId: string, filters: MessageFilters = {}) {
   await connectToDatabase();
 
-  if (!isValidObjectId(conversationId)) return [];
+  if (!Types.ObjectId.isValid(conversationId)) return [];
 
   const limit = Math.min(Math.max(filters.limit || 120, 1), 250);
   const query: FilterQuery<any> = { tenantId, conversationId };

@@ -8,6 +8,7 @@ node_modules/
 .env*.local
 logs/
 *.log
+tsconfig.tsbuildinfo
 dist/
 build/
 .DS_Store

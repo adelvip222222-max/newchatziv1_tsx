@@ -3,6 +3,7 @@ import { Channel, WebhookEvent } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
 import { defaultJobOptions, ingressQueue, makeQueueJobId } from "@/lib/queues";
 import { logger } from "@/lib/logger";
+import { computeLatencyDurations, latencyTraceSummary, nowIso } from "@/lib/latency-trace";
 import { getAdapter } from "./registry";
 import { initializeAdapters } from "./providers";
 import type { ChannelProvider } from "./types";
@@ -56,6 +57,7 @@ export async function enqueueInboundWebhook(input: EnqueueWebhookInput) {
   await connectToDatabase();
 
   const traceId = input.traceId || createTraceId(input.provider);
+  const receivedAt = nowIso();
   const externalEventId = input.externalEventId || extractExternalEventId(input.provider, input.payload) || createPayloadHash(input.payload);
   const channel = await resolveInboundChannel(input);
 
@@ -72,6 +74,11 @@ export async function enqueueInboundWebhook(input: EnqueueWebhookInput) {
   const tenantId = String(channel?.tenantId || input.tenantId || "");
   const channelId = channel?._id?.toString() || input.channelId;
   const jobId = makeQueueJobId(input.provider, externalEventId);
+  const trace = computeLatencyDurations({
+    traceId,
+    receivedAt,
+    ingressQueuedAt: nowIso(),
+  });
 
   try {
     const event = await WebhookEvent.findOneAndUpdate(
@@ -85,13 +92,13 @@ export async function enqueueInboundWebhook(input: EnqueueWebhookInput) {
           eventType: "message",
           status: "received",
           rawPayload: input.payload,
-          metadata: { traceId }
+          metadata: { traceId, trace }
         }
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
 
-    if (event.status !== "received" || (event.metadata as any)?.traceId !== traceId) {
+    if (event.status !== "received" || event.metadata?.traceId !== traceId) {
       logger.info("webhook.duplicate", { provider: input.provider, externalEventId, tenantId, traceId });
       return { ok: true, duplicate: true, status: 200, traceId, externalEventId };
     }
@@ -112,7 +119,8 @@ export async function enqueueInboundWebhook(input: EnqueueWebhookInput) {
       externalEventId,
       rawPayload: input.payload,
       rawHeaders: serializeHeaders(input.request),
-      traceId
+      traceId,
+      trace
     },
     {
       ...defaultJobOptions,
@@ -120,7 +128,14 @@ export async function enqueueInboundWebhook(input: EnqueueWebhookInput) {
     }
   );
 
-  logger.info("webhook.enqueued", { provider: input.provider, externalEventId, tenantId, channelId, traceId });
+  logger.info("webhook.enqueued", {
+    provider: input.provider,
+    externalEventId,
+    tenantId,
+    channelId,
+    traceId,
+    latency: latencyTraceSummary(trace),
+  });
   return { ok: true, duplicate: false, status: 200, traceId, externalEventId };
 }
 

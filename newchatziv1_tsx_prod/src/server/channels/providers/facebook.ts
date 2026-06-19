@@ -8,7 +8,7 @@ const META_GRAPH_VERSION = "v18.0";
 const META_GRAPH_BASE = `https://graph.facebook.com/${META_GRAPH_VERSION}`;
 
 function resolveAppSecret(channel?: ChannelDocument): string {
-  const perChannel = (channel?.config as any)?.appSecret as string | undefined;
+  const perChannel = channel?.config?.appSecret as string | undefined;
   if (perChannel) return perChannel;
   return process.env.META_APP_SECRET || "";
 }

@@ -6,6 +6,7 @@ import { Bot, Conversation, Message } from "@/lib/models";
 import { coreRoutingQueue, defaultJobOptions, makeQueueJobId } from "@/lib/queues";
 import { createTraceId } from "@/server/channels/webhookIngress";
 import { publishRealtimeEvent } from "@/lib/realtime";
+import { computeLatencyDurations, nowIso } from "@/lib/latency-trace";
 
 const schema = z.object({
   message: z.string().min(1),
@@ -52,6 +53,13 @@ export async function POST(request: Request) {
     if (!conversation) throw new Error("Conversation not found.");
 
     const traceId = createTraceId("api");
+    const trace = computeLatencyDurations({
+      traceId,
+      receivedAt: nowIso(),
+      ingressQueuedAt: nowIso(),
+      ingressStartedAt: nowIso(),
+      ingressCompletedAt: nowIso(),
+    });
     const message = await Message.create({
       tenantId: body.tenantId,
       botId: body.botId,
@@ -62,7 +70,7 @@ export async function POST(request: Request) {
       senderType: "customer",
       content: body.message,
       deliveryStatus: "delivered",
-      metadata: { traceId }
+      metadata: { traceId, trace }
     });
 
     const now = new Date();
@@ -115,7 +123,8 @@ export async function POST(request: Request) {
         provider: "api",
         conversationId: conversation._id.toString(),
         messageId: message._id.toString(),
-        traceId
+        traceId,
+        trace
       },
       {
         ...defaultJobOptions,

@@ -1,4 +1,4 @@
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import { AiPersona, AiSetting, Bot, Conversation, Message, Tenant, User } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/strings";
@@ -13,6 +13,13 @@ import { isMastraAllowed, shouldFallbackToLegacy } from "@/lib/ai/orchestrator-f
 import { logger } from "@/lib/logger";
 import { isExplicitHumanHandoffRequest } from "@/lib/ai/handoff";
 import { classifyTicketIntent, ensureTicketForConversation } from "@/lib/tickets";
+import { detectAndReplyFast } from "@/lib/ai/fast-intent-responder";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "@/lib/latency-trace";
 
 export type GenerateReplyInput = {
   tenantId: string;
@@ -147,7 +154,7 @@ type DirectReplyOptions = {
 export async function generateAiReplyLegacy(input: GenerateReplyInput, options: DirectReplyOptions = {}) {
   await connectToDatabase();
 
-  if (!isValidObjectId(input.tenantId) || !isValidObjectId(input.botId)) {
+  if (!Types.ObjectId.isValid(input.tenantId) || !Types.ObjectId.isValid(input.botId)) {
     throw new Error("معرف المستأجر أو البوت غير صالح.");
   }
 
@@ -168,7 +175,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
   }
 
   const conversation =
-    input.conversationId && isValidObjectId(input.conversationId)
+    input.conversationId && Types.ObjectId.isValid(input.conversationId)
       ? await Conversation.findOne({
           _id: input.conversationId,
           tenantId: input.tenantId,
@@ -237,6 +244,9 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     };
   }
 
+  let trace = mergeLatencyTrace((input.metadata as any)?.trace, {
+    traceId: (input.metadata as any)?.traceId,
+  });
   const metadata = normalizeObject(conversation.metadata);
   const aiPolicy = normalizeObject(metadata.aiPolicy);
   const explicitHandoffRequested = isExplicitHumanHandoffRequest(input.message);
@@ -249,6 +259,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       reason: "handoff_requested",
       userMessage: input.message,
       summary: "Customer requested a human agent.",
+      trace,
       // publicMessage intentionally omitted — escalation.ts DEFAULT_ESCALATION_MESSAGE is used
       // The agent itself should generate a natural contextual message when possible
     });
@@ -264,6 +275,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
   const moderation = await checkContentModeration(input.message);
   if (!moderation.isSafe) {
     const fallback = setting?.fallbackMessage || "عذراً، لا يمكنني معالجة هذا الطلب. يرجى التوضيح أو التواصل مع الدعم.";
+    const savedTrace = markLatencyTrace(trace, "assistantSavedAt");
     const flaggedMessage = await Message.create({
       tenantId: input.tenantId,
       botId: input.botId,
@@ -275,14 +287,14 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       sender: "assistant",
       senderType: "assistant",
       content: fallback,
-      deliveryStatus: "sent",
-      metadata: { flagged: true, reason: moderation.reason },
+      deliveryStatus: "queued",
+      metadata: { flagged: true, reason: moderation.reason, trace: savedTrace },
     });
     conversation.lastMessageAt = new Date();
     conversation.lastAiMessageAt = new Date();
     conversation.lastMessagePreview = fallback.slice(0, 220);
     await conversation.save();
-    publishRealtimeEvent(input.tenantId, "message.created", {
+    await publishRealtimeEvent(input.tenantId, "message.created", {
       message: {
         id: flaggedMessage._id.toString(),
         conversationId: conversation._id.toString(),
@@ -291,7 +303,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
         sender: "assistant",
         senderType: "assistant",
         provider: input.channel,
-        deliveryStatus: flaggedMessage.deliveryStatus || "sent",
+        deliveryStatus: flaggedMessage.deliveryStatus || "queued",
         createdAt: flaggedMessage.createdAt?.toISOString?.() || new Date().toISOString(),
         attachments: []
       },
@@ -304,6 +316,8 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
         provider: input.channel
       }
     }).catch(() => undefined);
+    trace = markLatencyTrace(savedTrace, "realtimePublishedAt");
+    await Message.updateOne({ _id: flaggedMessage._id, tenantId: input.tenantId }, { $set: latencyTraceMongoSet(trace) });
     return {
       reply: fallback,
       conversationId: conversation._id.toString(),
@@ -321,28 +335,37 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     .limit(MAX_MESSAGES_FETCH)
     .lean();
 
-  const priorAssistantCount = previousMessages.filter((message) => message.direction === "outgoing" && message.sender === "assistant").length;
-  const firstTurnGreeting = priorAssistantCount === 0 && isGreetingOnly(input.message);
+  const tenantDisplayName = await resolveTenantDisplayName(input.tenantId, bot.name);
+  trace = markLatencyTrace(trace, "fastResponderStartedAt");
+  const fastIntent = await detectAndReplyFast({
+    tenantId: input.tenantId,
+    botId: input.botId,
+    message: input.message,
+    botName: bot.name,
+    businessName: tenantDisplayName,
+    language: setting?.language || "auto",
+    role: setting?.role || "assistant",
+    tone: setting?.tone || "friendly",
+    responseLength: setting?.responseLength || "short",
+    fallbackMessage: setting?.fallbackMessage,
+  });
+  trace = markLatencyTrace(trace, "fastResponderCompletedAt");
 
-  if (firstTurnGreeting) {
-    const tenantDisplayName = await resolveTenantDisplayName(input.tenantId, bot.name);
-    const personas = await AiPersona.find({ tenantId: input.tenantId, isActive: true })
-      .sort({ createdAt: 1 })
-      .select("roleName description greetingMessage personaType")
-      .limit(6)
-      .lean();
-
-    const reply = buildWelcomeReply(tenantDisplayName, personas);
+  if (fastIntent.handled && fastIntent.reply) {
     const replyMessage = await createOutgoingAiReply({
       tenantId: input.tenantId,
       conversation,
       channel: input.channel,
-      reply,
+      reply: fastIntent.reply,
       metadata: {
-        fastPath: "first_greeting",
-        tenantDisplayName,
-        personaCount: personas.length
-      }
+        trace,
+        fastPath: fastIntent.reason || `ai_fast_${fastIntent.intent}`,
+        fastIntent: fastIntent.intent,
+        fastLanguage: fastIntent.language,
+        fastModelCalled: fastIntent.modelCalled,
+        fastProviderUsed: fastIntent.providerUsed,
+        fastModelUsed: fastIntent.modelUsed,
+      },
     });
 
     conversation.aiTurnCount = Number(conversation.aiTurnCount || 0) + 1;
@@ -351,16 +374,25 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       ...normalizeObject(conversation.metadata),
       aiPolicy: {
         ...normalizeObject(normalizeObject(conversation.metadata).aiPolicy),
-        greetedAt: new Date().toISOString(),
-        fastGreeting: true
-      }
+        lastFastIntent: fastIntent.intent,
+        lastFastIntentAt: new Date().toISOString(),
+      },
     };
     await conversation.save();
 
-    return {
-      reply,
+    logger.info("ai.fast_responder_handled", {
+      tenantId: input.tenantId,
+      botId: input.botId,
       conversationId: conversation._id.toString(),
-      confidence: 100,
+      intent: fastIntent.intent,
+      confidence: fastIntent.confidence,
+      latency: latencyTraceSummary((replyMessage.metadata as any)?.trace || trace),
+    });
+
+    return {
+      reply: fastIntent.reply,
+      conversationId: conversation._id.toString(),
+      confidence: fastIntent.confidence,
       messageId: replyMessage._id.toString(),
     };
   }
@@ -422,6 +454,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
 
   const knowledgeEnabled = bot.knowledgeEnabled ?? true;
   const knowledgeQuery = enhanceQuestionWithAttachments(input.message, input.metadata);
+  trace = markLatencyTrace(trace, "knowledgeStartedAt");
   const knowledge = knowledgeEnabled
     ? await searchKnowledge({
         tenantId: input.tenantId,
@@ -430,6 +463,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
         limit: Number(process.env.AI_KB_SEARCH_LIMIT || 5),
       })
     : null;
+  trace = markLatencyTrace(trace, "knowledgeCompletedAt");
 
   const reviewThreshold = Number(process.env.AI_KB_REVIEW_THRESHOLD || bot.confidenceReviewThreshold || 15);
   const directThreshold = Number(process.env.AI_KB_DIRECT_THRESHOLD || bot.confidenceDirectThreshold || 50);
@@ -531,57 +565,6 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
 
   const temperature = groundedTemperature(setting?.temperature);
 
-  if (lowKnowledgeConfidence && isClearlyOutOfBusinessScope(input.message)) {
-    const scopedReply = buildOutOfScopeReply(input.message);
-    const scopedMessage = await createOutgoingAiReply({
-      tenantId: input.tenantId,
-      conversation,
-      channel: input.channel,
-      reply: scopedReply,
-      metadata: {
-        fastPath: "out_of_business_scope",
-        aiPolicy: {
-          turnCount: nextAiTurnCount,
-          clarificationCount,
-          repeatedUserCount,
-          lowKnowledgeConfidence: true,
-        },
-        knowledge: { enabled: knowledgeEnabled, confidence: knowledge?.confidence ?? 0, sourceCount: knowledge?.results.length ?? 0 },
-      },
-    });
-
-    conversation.aiTurnCount = nextAiTurnCount;
-    conversation.aiStatus = "active";
-    conversation.metadata = {
-      ...metadata,
-      aiPolicy: {
-        ...aiPolicy,
-        lastUserFingerprint: currentUserFingerprint,
-        lastAssistantFingerprint: fingerprint(scopedReply),
-        clarificationCount,
-        repeatedUserCount,
-        lastKnowledgeConfidence: knowledge?.confidence ?? null,
-        lastKnowledgeSourceCount: knowledge?.results.length ?? 0,
-        lastAiReplyAt: new Date().toISOString(),
-      },
-    };
-    await conversation.save();
-
-    void captureWorkflowIfReady({
-      tenantId: input.tenantId,
-      conversation,
-      userMessage: input.message,
-      aiReply: scopedReply,
-      confidence: knowledge?.confidence ?? null,
-    }).catch(() => undefined);
-
-    return {
-      reply: scopedReply,
-      conversationId: conversation._id.toString(),
-      confidence: knowledge?.confidence ?? 0,
-      messageId: scopedMessage._id.toString(),
-    };
-  }
 
   await assertAndReserveQuota(input.tenantId);
 
@@ -591,11 +574,13 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
   let modelUsed = "";
 
   try {
+    trace = markLatencyTrace(trace, "modelStartedAt");
     const result = await routeAiRequest({
       systemPrompt,
       userInput: modelInput,
       temperature
     });
+    trace = markLatencyTrace(trace, "modelCompletedAt");
     rawReply = result.reply;
     responseId = result.responseId;
     providerUsed = result.providerUsed;
@@ -611,6 +596,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       topScore: topKnowledgeScore,
     });
   } catch (error) {
+    trace = markLatencyTrace(trace, "modelCompletedAt");
     logger.error("ai.provider_error_direct_fallback", {
       tenantId: input.tenantId,
       botId: input.botId,
@@ -627,6 +613,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       channel: input.channel,
       reply: fallback,
       metadata: {
+        trace,
         directFallback: true,
         reason: "provider_error",
         aiPolicy: {
@@ -658,6 +645,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
         channel: input.channel,
         reply: repairReply,
         metadata: {
+          trace,
           aiPolicy: {
             turnCount: nextAiTurnCount,
             repeatedAssistantCount,
@@ -702,6 +690,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       channel: input.channel,
       reply: finalRepairReply,
       metadata: {
+        trace,
         directFallback: true,
         reason: "repeated_reply_repair",
         aiPolicy: {
@@ -720,6 +709,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     };
   }
 
+  const savedTrace = markLatencyTrace(trace, "assistantSavedAt");
   const replyMessage = await Message.create({
     tenantId: input.tenantId,
     botId: input.botId,
@@ -731,8 +721,9 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     sender: "assistant",
     senderType: "assistant",
     content: reply,
-    deliveryStatus: "sent",
+    deliveryStatus: "queued",
     metadata: {
+      trace: savedTrace,
       responseId,
       provider: providerUsed,
       aiModelId: modelUsed,
@@ -803,7 +794,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
     confidence: knowledge?.confidence ?? null
   }).catch(() => undefined);
 
-  publishRealtimeEvent(input.tenantId, "message.created", {
+  await publishRealtimeEvent(input.tenantId, "message.created", {
     message: {
       id: replyMessage._id.toString(),
       conversationId: conversation._id.toString(),
@@ -812,7 +803,7 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       sender: "assistant",
       senderType: "assistant",
       provider: input.channel,
-      deliveryStatus: replyMessage.deliveryStatus || "sent",
+      deliveryStatus: replyMessage.deliveryStatus || "queued",
       createdAt: replyMessage.createdAt?.toISOString?.() || new Date().toISOString(),
       attachments: []
     },
@@ -826,6 +817,8 @@ export async function generateAiReplyLegacy(input: GenerateReplyInput, options: 
       provider: input.channel
     }
   }).catch(() => undefined);
+  trace = markLatencyTrace(savedTrace, "realtimePublishedAt");
+  await Message.updateOne({ _id: replyMessage._id, tenantId: input.tenantId }, { $set: latencyTraceMongoSet(trace) });
 
   return {
     reply,
@@ -843,6 +836,7 @@ async function createOutgoingAiReply(input: {
   reply: string;
   metadata?: Record<string, unknown>;
 }) {
+  let trace = markLatencyTrace((input.metadata as any)?.trace, "assistantSavedAt");
   const message = await Message.create({
     tenantId: input.tenantId,
     botId: input.conversation.botId,
@@ -854,8 +848,11 @@ async function createOutgoingAiReply(input: {
     sender: "assistant",
     senderType: "assistant",
     content: input.reply,
-    deliveryStatus: "sent",
-    metadata: input.metadata || {},
+    deliveryStatus: "queued",
+    metadata: {
+      ...(input.metadata || {}),
+      trace,
+    },
   });
 
   input.conversation.lastMessageAt = new Date();
@@ -863,7 +860,7 @@ async function createOutgoingAiReply(input: {
   input.conversation.lastMessagePreview = input.reply.slice(0, 220);
   await input.conversation.save();
 
-  publishRealtimeEvent(input.tenantId, "message.created", {
+  await publishRealtimeEvent(input.tenantId, "message.created", {
     message: {
       id: message._id.toString(),
       conversationId: input.conversation._id.toString(),
@@ -872,7 +869,7 @@ async function createOutgoingAiReply(input: {
       sender: "assistant",
       senderType: "assistant",
       provider: input.channel,
-      deliveryStatus: message.deliveryStatus || "sent",
+      deliveryStatus: message.deliveryStatus || "queued",
       createdAt: message.createdAt?.toISOString?.() || new Date().toISOString(),
       attachments: []
     },
@@ -887,13 +884,14 @@ async function createOutgoingAiReply(input: {
     }
   }).catch(() => undefined);
 
-  return message;
-}
+  trace = markLatencyTrace(trace, "realtimePublishedAt");
+  await Message.updateOne({ _id: message._id, tenantId: input.tenantId }, { $set: latencyTraceMongoSet(trace) });
+  (message as any).metadata = {
+    ...((message as any).metadata || {}),
+    trace,
+  };
 
-function isGreetingOnly(value: string) {
-  const text = fingerprint(value);
-  if (!text) return false;
-  return /^(السلام عليكم|سلام عليكم|سلام عليك|سلام|اهلا|اهلين|اهلا وسهلا|مرحبا|مرحبا بكم|هاي|هلو|اوكي|تمام|مساء الخير|صباح الخير|صباحو|مساء النور|hello|hi|hey|good morning|good afternoon|good evening|yo|sup)$/i.test(text);
+  return message;
 }
 
 function groundedTemperature(configured?: number | null) {
@@ -914,33 +912,6 @@ function sanitizeCustomerReply(value: string) {
 async function resolveTenantDisplayName(tenantId: string, fallback: string) {
   const tenant = await Tenant.findById(tenantId).select("name slug").lean();
   return tenant?.name || fallback || "ChatZi";
-}
-
-const GREETING_OPENERS = [
-  (name: string) => `أهلاً وسهلاً! 😊 أنا مساعد ${name}، كيف أقدر أخدمك اليوم؟`,
-  (name: string) => `مرحباً! يسعدني أساعدك. أنا من فريق ${name} — إيش تحتاج؟`,
-  (name: string) => `هلا هلا! 👋 أنا هنا من ${name}، قولي كيف أقدر أفيدك.`,
-  (name: string) => `وعليكم السلام ورحمة الله! أنا المساعد الذكي لـ ${name}، بخدمتك. 🙂`,
-  (name: string) => `أهلاً بك! شرفتنا. أنا مساعد ${name} — أقولي إيش تودّ تعرف أو تطلب؟`,
-];
-
-function buildWelcomeReply(companyName: string, personas: Array<any>) {
-  const opener = GREETING_OPENERS[Math.floor(Math.random() * GREETING_OPENERS.length)](companyName);
-  if (!personas.length) return opener;
-
-  const personaLines = personas
-    .slice(0, 5)
-    .map((persona) => `• ${persona.roleName}${persona.description ? ` — ${persona.description}` : ""}`)
-    .join("\n");
-
-  return [
-    opener,
-    "",
-    "عندنا كمان فريق متخصص يقدر يساعدك:",
-    personaLines,
-    "",
-    "اكتب سؤالك مباشرة وأنا هنا! 😊"
-  ].join("\n");
 }
 
 function enhanceQuestionWithAttachments(message: string, metadata?: Record<string, unknown>) {
@@ -1132,27 +1103,6 @@ async function resolveWorkflowRecipients(tenantId: string) {
   return [...new Set(users.map((user: any) => user.email).filter(Boolean))];
 }
 
-
-function isClearlyOutOfBusinessScope(value: string) {
-  const text = fingerprint(value);
-  if (!text) return false;
-
-  const businessTerms = /(سن|اسنان|ضرس|لثه|حجز|موعد|ميعاد|كشف|طبيب|دكتور|عياده|مركز|ابتسامه|زراعه|تقويم|تبييض|حشو|عصب|تركيبات|فينير|هوليوود|الم|نزيف|سعر|اسعار|خدمه|خدمات|عرض|عروض|دفع|فرع|عنوان|phone|appointment|booking|clinic|dent|dental|tooth|teeth|doctor|price|service|implant|whitening|braces)/i;
-  if (businessTerms.test(text)) return false;
-
-  return /(برمجه|بايثون|كود|html|css|javascript|طقس|درجه الحراره|توقعات الطقس|سماء|لون السماء|فيله|فيل|حيوان|حيوانات|بيض|اكل|طبخ|سياسه|رياضه|اخبار|programming|python|code|weather|temperature|sky|elephant|animal|egg|food|recipe|news|sports)/i.test(text);
-}
-
-function buildOutOfScopeReply(value: string) {
-  const text = fingerprint(value);
-  if (/(طقس|درجه الحراره|توقعات الطقس|weather|temperature)/i.test(text)) {
-    return "أعتذر، لا أستطيع عرض توقعات الطقس من داخل قاعدة معرفة هذا النشاط. أقدر أساعدك في خدمات المركز، الحجز، الأسعار المتاحة، أو أي استفسار يخص الأسنان.";
-  }
-  if (/(برمجه|بايثون|كود|html|css|javascript|programming|python|code)/i.test(text)) {
-    return "أعتذر، دوري هنا هو مساعدتك في خدمات هذا النشاط فقط، ولا أستطيع تعليم البرمجة أو كتابة أكواد. أقدر أساعدك في الحجز أو الاستفسار عن الخدمات والأسعار المتاحة.";
-  }
-  return "أعتذر، هذا السؤال خارج نطاق معلومات هذا النشاط. أقدر أساعدك في الخدمات، الحجز، الأسعار المتاحة، السياسات، أو الدعم الخاص بالمركز.";
-}
 
 function normalizeObject(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};

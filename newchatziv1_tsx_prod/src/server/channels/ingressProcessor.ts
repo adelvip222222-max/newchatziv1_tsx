@@ -2,6 +2,12 @@ import { Bot, Channel, ChannelIdentity, Contact, Conversation, Message, WebhookE
 import { connectToDatabase } from "@/lib/mongodb";
 import { coreRoutingQueue, defaultJobOptions, makeQueueJobId } from "@/lib/queues";
 import { logger } from "@/lib/logger";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "@/lib/latency-trace";
 import { publishRealtimeEvent } from "@/lib/realtime";
 import { getAdapter } from "./registry";
 import { initializeAdapters } from "./providers";
@@ -19,10 +25,15 @@ type IngressJobPayload = {
   rawPayload: any;
   rawHeaders?: Record<string, string>;
   traceId?: string;
+  trace?: Record<string, unknown>;
 };
 
 export async function processIngressJob(payload: IngressJobPayload) {
   await connectToDatabase();
+  let trace = markLatencyTrace(
+    mergeLatencyTrace(payload.trace, { traceId: payload.traceId }),
+    "ingressStartedAt"
+  );
 
   const channel = payload.channelId
     ? await Channel.findOne({ _id: payload.channelId, tenantId: payload.tenantId, type: payload.provider, isActive: true })
@@ -93,7 +104,7 @@ export async function processIngressJob(payload: IngressJobPayload) {
         content: normalized.text || "",
         attachments: normalized.attachments || [],
         deliveryStatus: "delivered",
-        metadata: { traceId: payload.traceId, raw: normalized.raw, dedupeKey }
+        metadata: { traceId: payload.traceId, trace, raw: normalized.raw, dedupeKey }
       });
     } catch (error: any) {
       if (error?.code === 11000) {
@@ -144,6 +155,8 @@ export async function processIngressJob(payload: IngressJobPayload) {
     publishRealtimeEvent(payload.tenantId, "message.created", realtimePayload).catch(() => undefined);
     publishRealtimeEvent(payload.tenantId, "notification.created", realtimePayload).catch(() => undefined);
 
+    trace = markLatencyTrace(trace, "ingressCompletedAt");
+
     await coreRoutingQueue.add(
       "route-message",
       {
@@ -153,12 +166,18 @@ export async function processIngressJob(payload: IngressJobPayload) {
         conversationId: conversation._id.toString(),
         messageId: message._id.toString(),
         externalMessageId: normalized.externalMessageId,
-        traceId: payload.traceId
+        traceId: payload.traceId,
+        trace
       },
       {
         ...defaultJobOptions,
         jobId: makeQueueJobId("route", dedupeKey)
       }
+    );
+
+    await Message.updateOne(
+      { _id: message._id, tenantId: payload.tenantId },
+      { $set: latencyTraceMongoSet(trace) }
     );
 
     processed += 1;
@@ -169,7 +188,14 @@ export async function processIngressJob(payload: IngressJobPayload) {
     { $set: { status: "processed", processedAt: new Date() } }
   );
 
-  logger.info("ingress.completed", { ...payload, processed });
+  logger.info("ingress.completed", {
+    provider: payload.provider,
+    tenantId: payload.tenantId,
+    externalEventId: payload.externalEventId,
+    traceId: payload.traceId,
+    processed,
+    latency: latencyTraceSummary(trace),
+  });
   return { processed };
 }
 

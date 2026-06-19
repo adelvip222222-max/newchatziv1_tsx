@@ -120,7 +120,8 @@ export async function POST(request: Request) {
       bot: {
         id: bot._id.toString(),
         name: bot.name,
-        avatar: bot.avatar
+        avatar: bot.avatar,
+        greetingMessage: ""
       },
       personas: personas.map((p: any) => ({
         id: p._id.toString(),

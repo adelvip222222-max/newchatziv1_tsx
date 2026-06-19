@@ -1,6 +1,6 @@
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import { searchKnowledge } from "@/lib/knowledge";
 
 const searchKnowledgeInputSchema = z.object({
@@ -32,8 +32,8 @@ export const searchKnowledgeTool = createTool({
   outputSchema: searchKnowledgeOutputSchema,
   execute: async (input) => {
     if (
-      !isValidObjectId(input.tenantId) ||
-      !isValidObjectId(input.botId)
+      !Types.ObjectId.isValid(input.tenantId) ||
+      !Types.ObjectId.isValid(input.botId)
     ) {
       throw new Error("Invalid tenant or bot identifier.");
     }

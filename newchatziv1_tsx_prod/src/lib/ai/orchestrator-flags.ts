@@ -25,9 +25,6 @@ export function shouldFallbackToLegacy() {
 }
 
 export function getMastraMaxToolCalls() {
-  // Default reduced from 5 → 2 to prevent multi-round LLM loops that add 2–8s per step.
-  // Override via env: MASTRA_MAX_TOOL_CALLS=5
-  const value = Number(process.env.MASTRA_MAX_TOOL_CALLS || 2);
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 2;
+  const value = Number(process.env.MASTRA_MAX_TOOL_CALLS || 1);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
 }
-

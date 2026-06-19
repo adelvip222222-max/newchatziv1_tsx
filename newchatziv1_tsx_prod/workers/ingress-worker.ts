@@ -18,7 +18,7 @@ export const ingressWorker = new Worker(
     logger.info("job.completed", { queueName: "ingress-queue", jobId: job.id, traceId: job.data?.traceId, result });
     return result;
   },
-  { connection: connection as any, concurrency: Number(process.env.INGRESS_WORKER_CONCURRENCY || 10) }
+  { connection: connection as any, concurrency: Number(process.env.INGRESS_WORKER_CONCURRENCY || 8) }
 );
 
 ingressWorker.on("failed", (job, error) => {

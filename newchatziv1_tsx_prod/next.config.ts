@@ -37,13 +37,8 @@ const nextConfig: NextConfig = {
       }
     ];
   },
-  serverExternalPackages: ["pdf-parse", "mammoth", "exceljs", "bluebird", "unzipper", "posthog-node", "@mastra/core"],
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  webpack: (config) => config,
+  serverExternalPackages: ["pdf-parse", "exceljs", "mammoth", "unzipper", "bluebird"],
 };
 
 export default nextConfig;

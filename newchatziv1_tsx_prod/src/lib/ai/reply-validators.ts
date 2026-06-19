@@ -1,17 +1,14 @@
+// Terms that indicate the model leaked internal system info in its reply.
+// Keep this list TIGHT — only clear, unambiguous internal tokens.
+// Do NOT add common words that may appear in natural business replies.
 const INTERNAL_TERMS = [
   "<think",
   "[sentiment:",
-  "rag",
-  "confidence score",
   "documentId",
   "tenantId",
   "botId",
-  "workflow",
-  "tool",
-  "chunk",
   "system prompt",
-  "source:",
-  "faq",
+  "confidence score",
 ];
 
 export type ReplyValidationResult = {
@@ -36,4 +33,3 @@ export function validateCustomerReply(reply: string): ReplyValidationResult {
 
   return { valid: true };
 }
-

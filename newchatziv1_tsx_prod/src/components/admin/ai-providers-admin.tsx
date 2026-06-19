@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, XCircle, Key, Server, Settings2, Loader2, Sparkles, AlertCircle } from "lucide-react";
+import { CheckCircle2, XCircle, Key, Server, Settings2, Loader2, Sparkles, AlertCircle, ChevronDown } from "lucide-react";
 
 type ProviderId = "openai" | "anthropic" | "gemini" | "openrouter" | "deepseek" | "xai" | "groq" | "ollama";
 
@@ -16,61 +16,104 @@ export type AiProviderRow = {
   priority: number;
 };
 
-const PROVIDERS_META: Record<ProviderId, { name: string; description: string; color: string; logoUrl?: string; modelCount: number }> = {
+const PROVIDERS_META: Record<ProviderId, { name: string; description: string; color: string; logoUrl?: string; modelCount: number; models: Array<{ id: string; label: string }> }> = {
   openai: {
     name: "OpenAI",
     description: "The most capable models including GPT-4o and GPT-4 Turbo. Highly reliable and versatile.",
     color: "bg-[#10a37f]",
-    modelCount: 4
+    modelCount: 4,
+    models: [
+      { id: "gpt-4o", label: "GPT-4o (Best quality)" },
+      { id: "gpt-4o-mini", label: "GPT-4o Mini (Fast & affordable)" },
+      { id: "gpt-4-turbo", label: "GPT-4 Turbo" },
+      { id: "gpt-3.5-turbo", label: "GPT-3.5 Turbo (Budget)" },
+    ]
   },
   anthropic: {
     name: "Anthropic",
     description: "Claude 3.5 Sonnet & Opus. Excellent at coding, long context windows, and nuanced writing.",
     color: "bg-[#d97757]",
-    modelCount: 3
+    modelCount: 3,
+    models: [
+      { id: "claude-3-5-sonnet-20240620", label: "Claude 3.5 Sonnet (Recommended)" },
+      { id: "claude-3-opus-20240229", label: "Claude 3 Opus (Most powerful)" },
+      { id: "claude-3-haiku-20240307", label: "Claude 3 Haiku (Fast)" },
+    ]
   },
   gemini: {
     name: "Google Gemini",
     description: "Gemini 1.5 Pro with a massive 1M token context window. Great for document analysis.",
     color: "bg-[#1a73e8]",
-    modelCount: 2
+    modelCount: 2,
+    models: [
+      { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash (Latest & fast)" },
+      { id: "gemini-1.5-pro", label: "Gemini 1.5 Pro (Long context)" },
+      { id: "gemini-1.5-flash", label: "Gemini 1.5 Flash (Budget)" },
+    ]
   },
   openrouter: {
     name: "OpenRouter",
     description: "Unified API for 100+ models. Automatically routes to the cheapest or best endpoints.",
     color: "bg-[#4f46e5]",
-    modelCount: 120
+    modelCount: 120,
+    models: [
+      { id: "openai/gpt-4o", label: "GPT-4o via OpenRouter" },
+      { id: "openai/gpt-4o-mini", label: "GPT-4o Mini via OpenRouter" },
+      { id: "google/gemini-flash-1.5", label: "Gemini Flash via OpenRouter" },
+      { id: "mistralai/mistral-7b-instruct:free", label: "Mistral 7B (Free)" },
+      { id: "meta-llama/llama-3.1-8b-instruct:free", label: "LLaMA 3.1 8B (Free)" },
+    ]
   },
   deepseek: {
     name: "DeepSeek",
     description: "Highly efficient open-weight models offering exceptional coding performance at low costs.",
     color: "bg-[#2563eb]",
-    modelCount: 2
+    modelCount: 2,
+    models: [
+      { id: "deepseek-chat", label: "DeepSeek Chat (Recommended)" },
+      { id: "deepseek-reasoner", label: "DeepSeek Reasoner" },
+    ]
   },
   xai: {
     name: "xAI (Grok)",
     description: "Grok models with real-time knowledge and unfiltered intelligence.",
     color: "bg-[#000000]",
-    modelCount: 2
+    modelCount: 2,
+    models: [
+      { id: "grok-beta", label: "Grok Beta" },
+      { id: "grok-2", label: "Grok 2" },
+    ]
   },
   groq: {
     name: "Groq",
     description: "LPU inference engine delivering lightning-fast generation for open source models like LLaMA 3.",
     color: "bg-[#f97316]",
-    modelCount: 5
+    modelCount: 5,
+    models: [
+      { id: "llama-3.1-70b-versatile", label: "LLaMA 3.1 70B (Best)" },
+      { id: "llama-3.1-8b-instant", label: "LLaMA 3.1 8B (Fastest)" },
+      { id: "mixtral-8x7b-32768", label: "Mixtral 8x7B" },
+      { id: "gemma2-9b-it", label: "Gemma 2 9B" },
+    ]
   },
   ollama: {
     name: "Ollama",
     description: "Run Llama 3, Mistral, and other open-source models locally on your own hardware.",
     color: "bg-[#52525b]",
-    modelCount: 10
+    modelCount: 10,
+    models: [
+      { id: "llama3", label: "LLaMA 3 (Default)" },
+      { id: "mistral", label: "Mistral 7B" },
+      { id: "gemma2", label: "Gemma 2" },
+      { id: "phi3", label: "Phi-3" },
+    ]
   }
 };
 
 export function AiProvidersAdmin({ providers }: { providers: AiProviderRow[] }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [editingProvider, setEditingProvider] = useState<ProviderId | null>(null);
-  const [formData, setFormData] = useState({ apiKey: "", baseUrl: "", isActive: true, isDefault: false });
+  const [formData, setFormData] = useState({ apiKey: "", baseUrl: "", selectedModel: "", isActive: true, isDefault: false });
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -89,6 +132,7 @@ export function AiProvidersAdmin({ providers }: { providers: AiProviderRow[] }) 
           providerId,
           apiKey: formData.apiKey,
           baseUrl: formData.baseUrl,
+          selectedModel: formData.selectedModel || undefined,
           isActive: formData.isActive,
           isDefault: formData.isDefault
         })
@@ -108,9 +152,11 @@ export function AiProvidersAdmin({ providers }: { providers: AiProviderRow[] }) 
   function openEdit(pId: ProviderId, existing?: AiProviderRow) {
     setError("");
     setSuccess("");
+    const defaultModel = PROVIDERS_META[pId].models[0]?.id || "";
     setFormData({
       apiKey: "",
       baseUrl: existing?.baseUrl || "",
+      selectedModel: defaultModel,
       isActive: existing?.isActive ?? true,
       isDefault: existing?.isDefault ?? false
     });
@@ -192,6 +238,24 @@ export function AiProvidersAdmin({ providers }: { providers: AiProviderRow[] }) 
                         className="w-full text-sm rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
                         dir="ltr"
                       />
+                    </div>
+
+                    {/* Model Selector */}
+                    <div>
+                      <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 block flex items-center gap-1.5">
+                        <ChevronDown size={14} /> النموذج الافتراضي
+                        <span className="font-normal text-slate-400 mr-1">(يُستخدم لجميع البوتات)</span>
+                      </label>
+                      <select
+                        value={formData.selectedModel}
+                        onChange={(e) => setFormData({ ...formData, selectedModel: e.target.value })}
+                        className="w-full text-sm rounded-lg border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-slate-900 dark:text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all"
+                        dir="ltr"
+                      >
+                        {meta.models.map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                      </select>
                     </div>
                     
                     {(pId === "ollama" || pId === "openai") && (

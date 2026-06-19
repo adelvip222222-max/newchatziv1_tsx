@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import {
   Activity,
   AlertTriangle,
@@ -110,7 +110,7 @@ export default async function ChannelsPage() {
       {
         tenantId: session.user.tenantId,
         type,
-        ...(botId && isValidObjectId(botId) ? { botId } : {})
+        ...(botId && Types.ObjectId.isValid(botId) ? { botId } : {})
       },
       { $set: { isActive: false } }
     );
@@ -187,7 +187,7 @@ export default async function ChannelsPage() {
                       <span className="mx-2">•</span>
                       Webhook: {channel.webhookStatus}
                       <span className="mx-2">•</span>
-                      {isAr ? "رسائل آخر 24 ساعة" : "Messages 24h"}: {String(channel.inbound24h)}
+                      {isAr ? "رسائل آخر 24 ساعة" : "Messages 24h"}: {channel.inbound24h}
                     </p>
                   </div>
                 </div>
@@ -220,7 +220,7 @@ export default async function ChannelsPage() {
 
 async function getChannelsOverview(tenantId: string) {
   await connectToDatabase();
-  const tenantMatch = isValidObjectId(tenantId) ? new (Types.ObjectId as any)(tenantId) : tenantId;
+  const tenantMatch = Types.ObjectId.isValid(tenantId) ? new Types.ObjectId(tenantId) : tenantId;
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const types = channelDefinitions.map((channel) => channel.type);
 
@@ -241,7 +241,7 @@ async function getChannelsOverview(tenantId: string) {
     WebhookLog.find({ tenantId }).sort({ createdAt: -1 }).limit(200).lean().catch(() => [])
   ]);
 
-  const inboundByType = new Map(conversationCounts.map((item: any) => [String(item._id), Number(item.count)] as [string, number]));
+  const inboundByType = new Map(conversationCounts.map((item) => [String(item._id), item.count]));
   const eventsByType = groupLatest(webhookEvents, (event: any) => String(event.provider || ""));
   const logsByType = groupLatest(webhookLogs, (log: any) => String(log.channel || ""));
 

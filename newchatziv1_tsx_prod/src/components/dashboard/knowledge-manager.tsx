@@ -14,8 +14,8 @@ import {
   Save,
   Sparkles,
   Trash2,
-  Pencil,
-  X
+  Eye,
+  X,
 } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 
@@ -131,12 +131,65 @@ export function KnowledgeManager({ bots, categories, documents }: KnowledgeManag
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [editingDoc, setEditingDoc] = useState<DocumentRow | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editTags, setEditTags] = useState("");
-  const [editText, setEditText] = useState("");
-  const [editLoading, setEditLoading] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState("");
+  const [rewritingId, setRewritingId] = useState("");
+  const [activeChunksDoc, setActiveChunksDoc] = useState<DocumentRow | null>(null);
+  const [chunks, setChunks] = useState<any[]>([]);
+  const [chunksLoading, setChunksLoading] = useState(false);
+  const [chunksError, setChunksError] = useState("");
+
+  async function handleDelete(id: string) {
+    if (!confirm(isAr ? "هل أنت متأكد من حذف هذا المصدر؟" : "Are you sure you want to delete this source?")) return;
+    setDeletingId(id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || (isAr ? "تعذر حذف المعرفة." : "Could not delete knowledge."));
+      setSuccess(isAr ? "تم حذف مصدر المعرفة بنجاح." : "Knowledge source deleted successfully.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : isAr ? "تعذر حذف المعرفة." : "Could not delete knowledge.");
+    } finally {
+      setDeletingId("");
+    }
+  }
+
+  async function handleRewrite(id: string) {
+    if (!confirm(isAr ? "هل تريد إعادة صياغة هذا المصدر باستخدام الذكاء الاصطناعي؟ سيحتاج لإعادة التدريب بعد ذلك." : "Do you want to rephrase this source using AI? It will need retraining afterward.")) return;
+    setRewritingId(id);
+    setError("");
+    setSuccess("");
+    try {
+      const response = await fetch(`/api/knowledge/${id}/rewrite`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || (isAr ? "تعذر إعادة صياغة المعرفة." : "Could not rewrite knowledge."));
+      setSuccess(isAr ? "تمت إعادة صياغة المعرفة بنجاح وبدأ التدريب الجديد." : "Knowledge rephrased successfully and new training started.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : isAr ? "تعذر إعادة صياغة المعرفة." : "Could not rewrite knowledge.");
+    } finally {
+      setRewritingId("");
+    }
+  }
+
+  async function handleShowChunks(doc: DocumentRow) {
+    setActiveChunksDoc(doc);
+    setChunksLoading(true);
+    setChunksError("");
+    setChunks([]);
+    try {
+      const response = await fetch(`/api/knowledge/${doc.id}/chunks`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || (isAr ? "تعذر جلب الأجزاء." : "Could not fetch chunks."));
+      setChunks(body.chunks || []);
+    } catch (err) {
+      setChunksError(err instanceof Error ? err.message : isAr ? "تعذر جلب الأجزاء." : "Could not fetch chunks.");
+    } finally {
+      setChunksLoading(false);
+    }
+  }
 
   const sourceType = detectSourceType(selectedFile);
   const globalHealth = useMemo(() => getGlobalHealth(documents), [documents]);
@@ -194,68 +247,6 @@ export function KnowledgeManager({ bots, categories, documents }: KnowledgeManag
       setError(err instanceof Error ? err.message : isAr ? "تعذر حفظ المعرفة." : "Could not save knowledge.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function openEditModal(doc: DocumentRow) {
-    setEditingDoc(doc);
-    setEditTitle(doc.title);
-    setEditTags(doc.tags.join(", "));
-    setEditText("");
-    setEditLoading(true);
-    try {
-      const res = await fetch(`/api/knowledge/${doc.id}`);
-      const data = await res.json();
-      if (res.ok && data.document) {
-        setEditText(data.document.rawText || "");
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setEditLoading(false);
-    }
-  }
-
-  async function submitEdit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!editingDoc) return;
-    setEditLoading(true);
-    try {
-      const res = await fetch(`/api/knowledge/${editingDoc.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: editTitle.trim(),
-          tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
-          rawText: editText.trim() || undefined
-        })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || (isAr ? "حدث خطأ أثناء التعديل" : "Error updating document"));
-      }
-      setSuccess(isAr ? "تم التعديل بنجاح" : "Updated successfully");
-      setEditingDoc(null);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error");
-    } finally {
-      setEditLoading(false);
-    }
-  }
-
-  async function deleteDoc(id: string) {
-    if (!window.confirm(isAr ? "هل أنت متأكد من حذف هذا المصدر؟ سيتم حذف جميع البيانات المرتبطة به." : "Are you sure you want to delete this source?")) return;
-    setDeleteLoading(id);
-    try {
-      const res = await fetch(`/api/knowledge/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(isAr ? "تعذر الحذف" : "Could not delete");
-      setSuccess(isAr ? "تم الحذف بنجاح" : "Deleted successfully");
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Error");
-    } finally {
-      setDeleteLoading(null);
     }
   }
 
@@ -425,27 +416,43 @@ export function KnowledgeManager({ bots, categories, documents }: KnowledgeManag
                           {statusLabel(doc.status, isAr)}
                         </span>
                       </td>
-                      <td className="p-3 text-slate-600">{doc.chunkCount}</td>
-                      <td className="p-3 text-slate-600">{doc.embeddingCount}</td>
-                      <td className="p-3 text-xs text-slate-500" suppressHydrationWarning>
-                        {doc.updatedAt ? new Date(doc.updatedAt).toLocaleString(isAr ? "ar-EG" : "en-US") : "-"}
+                      <td className="p-3 text-slate-600">
+                        <button
+                          onClick={() => handleShowChunks(doc)}
+                          className="inline-flex items-center gap-1 text-primary-600 hover:text-primary-800 dark:text-primary-400 dark:hover:text-primary-300 font-semibold transition"
+                          title={isAr ? "عرض الأجزاء" : "View Chunks"}
+                        >
+                          <Eye size={14} />
+                          <span>{doc.chunkCount}</span>
+                        </button>
                       </td>
+                      <td className="p-3 text-slate-600">{doc.embeddingCount}</td>
+                      <td className="p-3 text-xs text-slate-500">{doc.updatedAt ? new Date(doc.updatedAt).toLocaleString(isAr ? "ar-EG" : "en-US") : "-"}</td>
                       <td className="p-3 text-center">
-                        <div className="flex items-center justify-center gap-2">
+                        <div className="inline-flex items-center gap-2">
                           <button
-                            onClick={() => openEditModal(doc)}
-                            className="rounded-md p-1.5 text-slate-500 hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/30 dark:hover:text-blue-400 transition"
-                            title={isAr ? "تعديل" : "Edit"}
+                            onClick={() => handleRewrite(doc.id)}
+                            disabled={rewritingId === doc.id || doc.status === "processing"}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-primary-600 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-primary-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            title={isAr ? "إعادة صياغة بالذكاء الاصطناعي" : "AI Rewrite/Rephrase"}
                           >
-                            <Pencil size={16} />
+                            {rewritingId === doc.id ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Sparkles size={16} />
+                            )}
                           </button>
                           <button
-                            onClick={() => deleteDoc(doc.id)}
-                            disabled={deleteLoading === doc.id}
-                            className="rounded-md p-1.5 text-slate-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition disabled:opacity-50"
+                            onClick={() => handleDelete(doc.id)}
+                            disabled={deletingId === doc.id}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 dark:text-slate-300 dark:hover:bg-red-950/20 dark:hover:text-red-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
                             title={isAr ? "حذف" : "Delete"}
                           >
-                            {deleteLoading === doc.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                            {deletingId === doc.id ? (
+                              <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                              <Trash2 size={16} />
+                            )}
                           </button>
                         </div>
                       </td>
@@ -460,53 +467,99 @@ export function KnowledgeManager({ bots, categories, documents }: KnowledgeManag
         </article>
       </section>
 
-      {editingDoc ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-2xl dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-            <div className="mb-6 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-ink">{isAr ? "تعديل المصدر" : "Edit Source"}</h2>
-              <button onClick={() => setEditingDoc(null)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+      {activeChunksDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 p-5">
+              <div>
+                <h3 className="text-lg font-bold text-ink flex items-center gap-2">
+                  <DatabaseZap className="text-primary-600" size={20} />
+                  <span>{isAr ? "أجزاء المعرفة لـ:" : "Knowledge Chunks for:"}</span>
+                  <span className="text-primary-600 dark:text-primary-400 font-semibold">{activeChunksDoc.title}</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {isAr 
+                    ? `إجمالي الأجزاء: ${activeChunksDoc.chunkCount} | إجمالي المتجهات: ${activeChunksDoc.embeddingCount}` 
+                    : `Total Chunks: ${activeChunksDoc.chunkCount} | Total Embeddings: ${activeChunksDoc.embeddingCount}`}
+                </p>
+              </div>
+              <button 
+                onClick={() => setActiveChunksDoc(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={submitEdit} className="space-y-4">
-              <div>
-                <label className="label">{isAr ? "العنوان" : "Title"}</label>
-                <input className="field" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} required />
-              </div>
-              <div>
-                <label className="label">{isAr ? "الوسوم" : "Tags"}</label>
-                <input className="field" value={editTags} onChange={(e) => setEditTags(e.target.value)} placeholder="tag1, tag2" />
-              </div>
-              {editingDoc.sourceType === "custom_text" ? (
-                <div>
-                  <label className="label">{isAr ? "النص" : "Text"}</label>
-                  <textarea 
-                    className="field min-h-[200px]" 
-                    value={editText} 
-                    onChange={(e) => setEditText(e.target.value)} 
-                    disabled={editLoading}
-                    required 
-                  />
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {chunksLoading ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="animate-spin text-primary-600" size={32} />
+                  <p className="mt-2 text-sm text-slate-500">{isAr ? "جاري تحميل الأجزاء..." : "Loading chunks..."}</p>
+                </div>
+              ) : chunksError ? (
+                <div className="rounded-lg bg-red-50 dark:bg-red-950/20 p-4 text-sm text-red-700 dark:text-red-300 flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  <span>{chunksError}</span>
+                </div>
+              ) : chunks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                  <DatabaseZap size={40} className="mb-2 text-slate-300" />
+                  <p className="text-sm">{isAr ? "لا توجد أجزاء متوفرة لهذا المستند بعد. تأكد من أن حالة المستند 'جاهز'." : "No chunks available for this document yet. Make sure the document status is 'Ready'."}</p>
                 </div>
               ) : (
-                <div className="rounded-lg bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                  {isAr ? "لا يمكن تعديل النص الداخلي للملفات المرفوعة مباشرة، يمكنك فقط تعديل العنوان والوسوم." : "You cannot directly edit the text of uploaded files, only the title and tags."}
+                <div className="space-y-4">
+                  {chunks.map((chunk, index) => (
+                    <div key={chunk._id || index} className="rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                        <span className="inline-flex items-center gap-1.5 rounded bg-primary-50 dark:bg-primary-950/50 px-2 py-0.5 text-xs font-bold text-primary-700 dark:text-primary-300">
+                          {isAr ? `الجزء ${chunk.chunkIndex + 1}` : `Chunk ${chunk.chunkIndex + 1}`}
+                        </span>
+                        <div className="flex gap-2 text-xs text-slate-500">
+                          <span>{isAr ? `الكلمات التقديرية: ${chunk.tokenEstimate}` : `Est. Words/Tokens: ${chunk.tokenEstimate}`}</span>
+                          <span>•</span>
+                          <span>{isAr ? `مزود المتجهات: ${chunk.embeddingProvider}` : `Vector Provider: ${chunk.embeddingProvider}`}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Text content */}
+                      <p className="text-sm text-ink leading-relaxed dark:text-slate-200 whitespace-pre-wrap selection:bg-primary-100 select-text">
+                        {chunk.text}
+                      </p>
+
+                      {/* Keywords */}
+                      {chunk.keywords && chunk.keywords.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                          <span className="text-xs font-semibold text-slate-500">{isAr ? "الكلمات المفتاحية:" : "Keywords:"}</span>
+                          {chunk.keywords.map((kw: string, i: number) => (
+                            <span key={i} className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs text-slate-600 dark:text-slate-400">
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
-              <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-5 dark:border-slate-800">
-                <button type="button" onClick={() => setEditingDoc(null)} className="btn-secondary">
-                  {isAr ? "إلغاء" : "Cancel"}
-                </button>
-                <button type="submit" disabled={editLoading} className="btn-primary">
-                  {editLoading ? <Loader2 size={16} className="animate-spin mr-2 inline-block" /> : null}
-                  {isAr ? "حفظ التعديلات" : "Save changes"}
-                </button>
-              </div>
-            </form>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="border-t border-slate-100 dark:border-slate-800 p-4 bg-slate-50 dark:bg-slate-900/50 flex justify-end">
+              <button 
+                onClick={() => setActiveChunksDoc(null)}
+                className="btn-secondary"
+              >
+                {isAr ? "إغلاق" : "Close"}
+              </button>
+            </div>
+
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

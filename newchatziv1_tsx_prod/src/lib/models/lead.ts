@@ -5,6 +5,7 @@ const leadSchema = new Schema(
     tenantId: { type: Schema.Types.ObjectId, ref: "Tenant", required: true, index: true },
     contactId: { type: Schema.Types.ObjectId, ref: "Contact", required: false, index: true },
     conversationId: { type: Schema.Types.ObjectId, ref: "Conversation", required: false, index: true },
+    ticketId: { type: Schema.Types.ObjectId, ref: "Ticket", required: false, index: true },
     stage: {
       type: String,
       enum: ["new", "qualified", "proposal", "negotiation", "won", "lost"],
@@ -24,7 +25,10 @@ const leadSchema = new Schema(
     phone: { type: String, default: "" },
     company: { type: String, default: "" },
     interest: { type: String, default: "" },
+    intent: { type: String, default: "", index: true },
+    status: { type: String, default: "new", index: true },
     notes: { type: String, default: "" },
+    lastMessageAt: { type: Date },
     score: { type: Number, default: 0 }
   },
   { timestamps: true }
@@ -32,6 +36,7 @@ const leadSchema = new Schema(
 
 leadSchema.index({ tenantId: 1, stage: 1 });
 leadSchema.index({ tenantId: 1, contactId: 1 }, { sparse: true });
+leadSchema.index({ tenantId: 1, ticketId: 1 }, { sparse: true });
 leadSchema.index({ tenantId: 1, assignedTo: 1 }, { sparse: true });
 
 export type LeadDocument = InferSchemaType<typeof leadSchema>;

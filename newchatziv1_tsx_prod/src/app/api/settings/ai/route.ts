@@ -5,10 +5,11 @@ import { permissions } from "@/server/permissions/permissions";
 import { AiSetting, AiModel, Bot } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/strings";
+import { Types } from "mongoose";
 
 const schema = z.object({
   botId: z.string().min(1),
-
+  aiModelId: z.string().optional(),
   isEnabled: z.boolean(),
   temperature: z.number().min(0).max(2),
   systemPrompt: z.string().min(10),
@@ -17,7 +18,7 @@ const schema = z.object({
   tone: z.string().optional(),
   responseLength: z.string().optional(),
   fallbackMessage: z.string().optional(),
-  useEmojis: z.boolean().optional()
+  useEmojis: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -29,25 +30,36 @@ export async function POST(request: Request) {
     const bot = await Bot.findOne({ _id: body.botId, tenantId: session.user.tenantId });
     if (!bot) return NextResponse.json({ error: "البوت غير موجود." }, { status: 404 });
 
+    // Validate aiModelId if provided
+    let resolvedAiModelId: Types.ObjectId | undefined = undefined;
+    if (body.aiModelId && Types.ObjectId.isValid(body.aiModelId)) {
+      const model = await AiModel.findOne({ _id: body.aiModelId, isActive: true }).lean();
+      if (model) {
+        resolvedAiModelId = model._id as Types.ObjectId;
+      }
+    }
+
+    const updateFields: Record<string, unknown> = {
+      tenantId: session.user.tenantId,
+      botId: body.botId,
+      temperature: body.temperature,
+      systemPrompt: body.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      language: body.language || "auto",
+      role: body.role || "assistant",
+      tone: body.tone || "neutral",
+      responseLength: body.responseLength || "medium",
+      fallbackMessage: body.fallbackMessage || "عذراً، لم أفهم طلبك جيداً. هل يمكنك التوضيح؟",
+      useEmojis: body.useEmojis ?? true,
+      isEnabled: body.isEnabled,
+    };
+
+    if (resolvedAiModelId) {
+      updateFields.aiModelId = resolvedAiModelId;
+    }
 
     await AiSetting.findOneAndUpdate(
       { tenantId: session.user.tenantId, botId: body.botId },
-      {
-        $set: {
-          tenantId: session.user.tenantId,
-          botId: body.botId,
-
-          temperature: body.temperature,
-          systemPrompt: body.systemPrompt || DEFAULT_SYSTEM_PROMPT,
-          language: body.language || "auto",
-          role: body.role || "assistant",
-          tone: body.tone || "neutral",
-          responseLength: body.responseLength || "medium",
-          fallbackMessage: body.fallbackMessage || "عذراً، لم أفهم طلبك جيداً. هل يمكنك التوضيح؟",
-          useEmojis: body.useEmojis ?? true,
-          isEnabled: body.isEnabled
-        }
-      },
+      { $set: updateFields },
       { upsert: true, new: true }
     );
 

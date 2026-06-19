@@ -1,7 +1,9 @@
 import crypto from "crypto";
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import { Bot, Conversation, Message, Ticket } from "@/lib/models";
 import { connectToDatabase } from "@/lib/mongodb";
+import { publishRealtimeEvent } from "@/lib/realtime";
+import { syncLeadFromTicket } from "@/lib/leads-from-tickets";
 
 export type TicketCategory =
   | "technical_support"
@@ -62,50 +64,26 @@ function buildSubject(input: {
 }
 
 export function classifyTicketIntent(message: string): TicketIntentClassification {
-  const normalized = message.toLowerCase().replace(/[إأآا]/g, "ا").replace(/[ىي]/g, "ي").replace(/ة/g, "ه");
+  // This function is intentionally kept minimal.
+  // It only catches explicit human-handoff requests before the main AI call
+  // to set ticket metadata. All other ticket classification is done by the
+  // AI model itself during generation — it emits [CREATE_TICKET:category]
+  // when it detects booking, sales, complaint, or support intent from context.
+  // This avoids hardcoded keyword matching across languages and domains.
+  const normalized = message
+    .toLowerCase()
+    .replace(/[إأآا]/g, "ا")
+    .replace(/[ىي]/g, "ي")
+    .replace(/ة/g, "ه");
 
+  // Only intercept clear, unambiguous requests for a human agent.
+  // Everything else goes through the AI model.
   if (/(موظف|بشري|انسان|خدمه\s*العملاء|الدعم\s*البشري|\bhuman\b|\bagent\b|representative|real person)/i.test(normalized)) {
     return {
       shouldCreate: true,
       category: "human_request",
       priority: "medium",
       reason: "explicit_human_request",
-    };
-  }
-
-  if (/(حجز|احجز|موعد|ميعاد|كشف|استشاره|استشارة|زيارة|appointment|booking|reserve|schedule)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "booking_request",
-      priority: /(طارئ|مستعجل|الم|ألم|نزيف|urgent|emergency)/i.test(normalized) ? "urgent" : "medium",
-      reason: "customer_booking_intent",
-    };
-  }
-
-  if (/(اشتري|شراء|اطلب|طلب|منتج|سعر|اسعار|عرض|باقة|باقه|اشتراك|sales|buy|purchase|order|quote|pricing)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "sales_request",
-      priority: "medium",
-      reason: "customer_sales_intent",
-    };
-  }
-
-  if (/(شكوى|اشتكي|زعلان|غاضب|سيء|سىء|مش راضي|complaint|angry|bad service)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "complaint",
-      priority: "high",
-      reason: "customer_complaint",
-    };
-  }
-
-  if (/(دعم فني|مشكله تقنيه|مشكلة تقنية|لا يعمل|مش شغال|عطل|خطا|خطأ|bug|error|technical support|not working)/i.test(normalized)) {
-    return {
-      shouldCreate: true,
-      category: "technical_support",
-      priority: "high",
-      reason: "technical_support_request",
     };
   }
 
@@ -117,13 +95,14 @@ export function classifyTicketIntent(message: string): TicketIntentClassificatio
   };
 }
 
+
 export async function ensureTicketForConversation(input: EnsureTicketInput) {
   await connectToDatabase();
 
   if (
-    !isValidObjectId(input.tenantId) ||
-    !isValidObjectId(input.botId) ||
-    !isValidObjectId(input.conversationId)
+    !Types.ObjectId.isValid(input.tenantId) ||
+    !Types.ObjectId.isValid(input.botId) ||
+    !Types.ObjectId.isValid(input.conversationId)
   ) {
     throw new Error("معرفات التذكرة غير صالحة.");
   }
@@ -167,7 +146,23 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
     if (input.description) update.description = input.description;
 
     await existing.updateOne({ $set: update });
-    return Ticket.findById(existing._id);
+    const refreshed = await Ticket.findById(existing._id);
+    if (refreshed) {
+      await syncLeadFromTicket({ tenantId: input.tenantId, ticketId: refreshed._id.toString() }).catch(() => null);
+      await publishRealtimeEvent(input.tenantId, "ticket.updated", {
+        ticket: {
+          id: refreshed._id.toString(),
+          number: refreshed.number || 0,
+          subject: refreshed.subject || refreshed.title,
+          status: refreshed.status,
+          priority: refreshed.priority,
+          category: refreshed.category,
+          updatedAt: refreshed.updatedAt?.toISOString?.() || new Date().toISOString(),
+        },
+        conversation: { id: input.conversationId },
+      }).catch(() => undefined);
+    }
+    return refreshed;
   }
 
   const [counter, bot, lastMessages] = await Promise.all([
@@ -185,7 +180,7 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
 
   const transcriptSummary = lastMessages
     .reverse()
-    .map((message: any) => `${message.sender}: ${message.content}`)
+    .map((message) => `${message.sender}: ${message.content}`)
     .join("\n");
   const subject =
     input.subject ||
@@ -195,9 +190,10 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
       externalUserId: conversation.externalUserId,
     });
 
-  return Ticket.create({
+  const createdTicket = await Ticket.create({
     tenantId: input.tenantId,
     botId: input.botId,
+    contactId: conversation.contactId || undefined,
     conversationId: input.conversationId,
     number: counter + 1,
     subject,
@@ -217,6 +213,22 @@ export async function ensureTicketForConversation(input: EnsureTicketInput) {
       }`,
     metadata: { ...(input.metadata || {}), issueFingerprint },
   });
+
+  await syncLeadFromTicket({ tenantId: input.tenantId, ticketId: createdTicket._id.toString() }).catch(() => null);
+  await publishRealtimeEvent(input.tenantId, "ticket.created", {
+    ticket: {
+      id: createdTicket._id.toString(),
+      number: createdTicket.number || 0,
+      subject: createdTicket.subject || createdTicket.title,
+      status: createdTicket.status,
+      priority: createdTicket.priority,
+      category: createdTicket.category,
+      createdAt: createdTicket.createdAt?.toISOString?.() || new Date().toISOString(),
+    },
+    conversation: { id: input.conversationId },
+  }).catch(() => undefined);
+
+  return createdTicket;
 }
 
 

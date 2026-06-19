@@ -209,7 +209,7 @@ async function startRedisBridge() {
     }
   });
 
-  subscriber.on("error", (error: any) => {
+  subscriber.on("error", (error) => {
     logger.warn("socket.redis_subscriber_error", {
       error: error instanceof Error ? error.message : "unknown",
     });

@@ -1,6 +1,7 @@
 import { Queue } from "bullmq";
 import { Message, MessageDelivery } from "@/lib/models";
 import { createRedisConnection, formatRedisError } from "@/lib/redis-connection";
+import { latencyTraceMongoSet, markLatencyTrace, mergeLatencyTrace } from "@/lib/latency-trace";
 
 const connection = createRedisConnection("outbound-queue", { failFast: true });
 const isBuild = process.env.npm_lifecycle_event === "build" || process.env.NEXT_PHASE === "phase-production-build";
@@ -15,16 +16,27 @@ type OutboundMessagePayload = {
   externalThreadId?: string;
   text: string;
   attachments?: unknown[];
+  trace?: Record<string, unknown>;
 };
 
 const retryDelayMs = 60_000;
 
+function outboundJobId(payload: OutboundMessagePayload) {
+  return ["outbound", payload.deliveryId, payload.provider]
+    .filter(Boolean)
+    .join("__")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 180);
+}
+
 async function addOutboundJob(payload: OutboundMessagePayload) {
   await outboundQueue.add("send", payload, {
     attempts: 3,
-    backoff: { type: "exponential", delay: 1000 },
-    removeOnComplete: true,
-    removeOnFail: false
+    priority: 1,
+    jobId: outboundJobId(payload),
+    backoff: { type: "exponential", delay: Number(process.env.OUTBOUND_JOB_BACKOFF_MS || 1000) },
+    removeOnComplete: { count: 2000, age: 24 * 60 * 60 },
+    removeOnFail: { count: 5000, age: 7 * 24 * 60 * 60 }
   });
 }
 
@@ -37,9 +49,16 @@ export async function queueOutboundMessage({
   text,
   attachments,
   externalUserId,
-  externalThreadId
+  externalThreadId,
+  trace: inputTrace
 }: any) {
-  // 1. Create delivery record
+  let trace = mergeLatencyTrace(inputTrace);
+  // 1. Create delivery record and mark message as queued before the channel adapter sends it.
+  await Message.findOneAndUpdate(
+    { _id: messageId, tenantId },
+    { $set: { deliveryStatus: "queued", ...latencyTraceMongoSet(trace) } }
+  );
+
   const delivery = await MessageDelivery.create({
     tenantId,
     messageId,
@@ -57,11 +76,17 @@ export async function queueOutboundMessage({
     externalUserId,
     externalThreadId,
     text,
-    attachments
+    attachments,
+    trace
   };
 
   try {
     await addOutboundJob(jobPayload);
+    trace = markLatencyTrace(trace, "outboundQueuedAt");
+    await Message.findOneAndUpdate(
+      { _id: messageId, tenantId },
+      { $set: latencyTraceMongoSet(trace) }
+    );
   } catch (error) {
     const errorMessage = formatRedisError(error);
     const nextRetryAt = new Date(Date.now() + retryDelayMs);
@@ -73,7 +98,7 @@ export async function queueOutboundMessage({
       metadata: { pendingQueuePayload: jobPayload }
     });
 
-    await Message.findByIdAndUpdate(messageId, { deliveryStatus: "queued" });
+    await Message.findByIdAndUpdate(messageId, { $set: { deliveryStatus: "queued", ...latencyTraceMongoSet(trace) } });
     console.error(`[outbound-queue] delivery ${delivery._id.toString()} saved for retry: ${errorMessage}`);
 
     return { delivery, enqueued: false };

@@ -18,7 +18,7 @@ const webhookEventSchema = new Schema(
   { timestamps: true }
 );
 
-webhookEventSchema.index({ provider: 1, externalEventId: 1 }, { unique: true });
+webhookEventSchema.index({ tenantId: 1, provider: 1, externalEventId: 1 }, { unique: true });
 webhookEventSchema.index({ tenantId: 1, channelId: 1, receivedAt: -1 });
 webhookEventSchema.index({ provider: 1, payloadHash: 1 });
 

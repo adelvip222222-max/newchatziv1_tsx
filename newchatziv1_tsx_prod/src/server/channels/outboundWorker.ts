@@ -6,6 +6,13 @@ import { initializeAdapters } from "./providers";
 import { createRedisConnection } from "@/lib/redis-connection";
 import { recordFailedJob } from "@/lib/job-monitoring";
 import { logger } from "@/lib/logger";
+import { publishRealtimeEvent } from "@/lib/realtime";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "@/lib/latency-trace";
 
 const connection = createRedisConnection("outbound-worker");
 
@@ -37,6 +44,19 @@ export const outboundWorker = new Worker(
     delivery.lastAttemptAt = new Date();
     await delivery.save();
 
+    const existingMessage = await Message.findOne({
+      _id: delivery.messageId,
+      tenantId: delivery.tenantId,
+    }).select("metadata").lean();
+    let trace = markLatencyTrace(
+      mergeLatencyTrace((job.data as any).trace, (existingMessage?.metadata as any)?.trace),
+      "outboundStartedAt"
+    );
+    await Message.findOneAndUpdate(
+      { _id: delivery.messageId, tenantId: delivery.tenantId },
+      { $set: { deliveryStatus: "sending", ...latencyTraceMongoSet(trace) } }
+    );
+
     const adapter = getAdapter(provider);
     
     const result = await adapter.sendMessage({
@@ -52,29 +72,54 @@ export const outboundWorker = new Worker(
       delivery.externalMessageId = result.externalMessageId;
       await delivery.save();
 
-      await Message.findByIdAndUpdate(delivery.messageId, {
-        deliveryStatus: "sent",
-        externalMessageId: result.externalMessageId
+      trace = markLatencyTrace(trace, "outboundSentAt");
+      const sentAt = new Date(String(trace.outboundSentAt || new Date().toISOString()));
+      await Message.findOneAndUpdate(
+        { _id: delivery.messageId, tenantId: delivery.tenantId },
+        {
+          $set: {
+            deliveryStatus: "sent",
+            externalMessageId: result.externalMessageId,
+            ...latencyTraceMongoSet({
+              ...trace,
+              outboundLatencyMs: delivery.createdAt
+              ? sentAt.getTime() - new Date(delivery.createdAt).getTime()
+              : undefined,
+            }),
+          },
+        }
+      );
+
+      await publishRealtimeEvent(delivery.tenantId.toString(), "delivery.updated", {
+        messageId: delivery.messageId.toString(),
+        deliveryId: delivery._id.toString(),
+        status: "sent",
+        provider,
+        externalMessageId: result.externalMessageId,
+        sentAt: sentAt.toISOString(),
       });
       logger.info("outbound.sent", {
         deliveryId: delivery._id.toString(),
         tenantId: delivery.tenantId?.toString(),
         provider,
-        externalMessageId: result.externalMessageId
+        externalMessageId: result.externalMessageId,
+        latency: latencyTraceSummary(trace),
       });
     } else {
       delivery.status = "failed";
       delivery.errorMessage = result.error?.message || (typeof result.error === 'string' ? result.error : JSON.stringify(result.error)) || "Unknown error";
       await delivery.save();
 
-      await Message.findByIdAndUpdate(delivery.messageId, {
-        deliveryStatus: "failed"
-      });
+      trace = markLatencyTrace(trace, "outboundFailedAt");
+      await Message.findOneAndUpdate(
+        { _id: delivery.messageId, tenantId: delivery.tenantId },
+        { $set: { deliveryStatus: "failed", ...latencyTraceMongoSet(trace) } }
+      );
 
       throw new Error(delivery.errorMessage || "Unknown error"); // Trigger BullMQ retry
     }
   },
-  { connection: connection as any }
+  { connection: connection as any, concurrency: Number(process.env.OUTBOUND_WORKER_CONCURRENCY || 8) }
 );
 
 outboundWorker.on("failed", (job, err) => {

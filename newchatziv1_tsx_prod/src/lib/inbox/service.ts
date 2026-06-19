@@ -1,4 +1,4 @@
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import {
   Contact,
   Channel,
@@ -65,7 +65,7 @@ export async function ensureInboxDefaults(tenantId: string, userId?: string) {
             tenantId,
             name,
             color: name === "Sales" ? "emerald" : name === "Billing" ? "amber" : "blue",
-            memberIds: userId && isValidObjectId(userId) ? [userId] : []
+            memberIds: userId && Types.ObjectId.isValid(userId) ? [userId] : []
           }
         },
         { upsert: true, new: true }
@@ -84,7 +84,7 @@ export async function ensureInboxDefaults(tenantId: string, userId?: string) {
             body: reply.body,
             category: reply.category,
             tags: reply.tags,
-            createdBy: userId && isValidObjectId(userId) ? userId : undefined
+            createdBy: userId && Types.ObjectId.isValid(userId) ? userId : undefined
           }
         },
         { upsert: true, new: true }
@@ -136,7 +136,7 @@ export async function getConversationDetail(input: {
   forceAi?: boolean;
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
 
   const conversation = await Conversation.findOne({
     _id: input.conversationId,
@@ -209,7 +209,7 @@ export async function sendInboxReply(input: {
   attachments?: unknown[];
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
   const content = input.content.trim();
   if (!content) throw new Error("Message content is required.");
 
@@ -335,14 +335,14 @@ export async function createInboxNote(input: {
   mentions?: string[];
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
   const content = input.content.trim();
   if (!content) throw new Error("Note content is required.");
 
   const conversation = await Conversation.findOne({ _id: input.conversationId, tenantId: input.tenantId }).select("_id");
   if (!conversation) throw new Error("Conversation not found.");
 
-  const mentions = (input.mentions || []).filter((id) => isValidObjectId(id));
+  const mentions = (input.mentions || []).filter((id) => Types.ObjectId.isValid(id));
   const note = await ConversationNote.create({
     tenantId: input.tenantId,
     conversationId: conversation._id,
@@ -380,7 +380,7 @@ export async function updateInboxAssignment(input: {
   teamId?: string;
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
 
   const update: Record<string, unknown> = {
     assignedAt: new Date(),
@@ -390,7 +390,7 @@ export async function updateInboxAssignment(input: {
   if (input.agentId === "") {
     update.assignedAgentId = null;
     update.assigneeId = null;
-  } else if (input.agentId && isValidObjectId(input.agentId)) {
+  } else if (input.agentId && Types.ObjectId.isValid(input.agentId)) {
     const agent = await User.findOne({ _id: input.agentId, tenantId: input.tenantId, isActive: true }).select("_id");
     if (!agent) throw new Error("Agent not found.");
     update.assignedAgentId = agent._id;
@@ -400,7 +400,7 @@ export async function updateInboxAssignment(input: {
   if (input.teamId === "") {
     update.assignedTeamId = null;
     update.teamId = null;
-  } else if (input.teamId && isValidObjectId(input.teamId)) {
+  } else if (input.teamId && Types.ObjectId.isValid(input.teamId)) {
     const team = await Team.findOne({ _id: input.teamId, tenantId: input.tenantId, isActive: true }).select("_id");
     if (!team) throw new Error("Team not found.");
     update.assignedTeamId = team._id;
@@ -443,7 +443,7 @@ export async function updateInboxStatus(input: {
   status: "open" | "pending" | "resolved" | "closed" | "snoozed" | "archived";
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
 
   const now = new Date();
   const update: Record<string, unknown> = { status: input.status };
@@ -490,7 +490,7 @@ export async function deleteInboxConversation(input: {
   conversationId: string;
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
 
   const conversation = await Conversation.findOne({ _id: input.conversationId, tenantId: input.tenantId }).select("_id");
   if (!conversation) throw new Error("Conversation not found.");
@@ -517,7 +517,7 @@ export async function markConversationRead(input: {
   conversationId: string;
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(input.conversationId)) throw new Error("Invalid conversation id.");
 
   const conversation = await Conversation.findOneAndUpdate(
     { _id: input.conversationId, tenantId: input.tenantId, unreadCount: { $gt: 0 } },
@@ -619,13 +619,13 @@ function applyAgentFilter(and: Record<string, unknown>[], value?: string) {
   if (!value) return;
   if (value === "unassigned") {
     and.push({ $or: [{ assignedAgentId: { $exists: false } }, { assignedAgentId: null }] });
-  } else if (isValidObjectId(value)) {
+  } else if (Types.ObjectId.isValid(value)) {
     and.push({ $or: [{ assignedAgentId: value }, { assigneeId: value }] });
   }
 }
 
 function applyTeamFilter(and: Record<string, unknown>[], value?: string) {
-  if (value && isValidObjectId(value)) {
+  if (value && Types.ObjectId.isValid(value)) {
     and.push({ $or: [{ assignedTeamId: value }, { teamId: value }] });
   }
 }
@@ -707,7 +707,7 @@ async function searchNotes(tenantId: string, search: string, regex: RegExp) {
 }
 
 async function getInboxAnalytics(tenantId: string) {
-  const tenantObjectId = isValidObjectId(tenantId) ? new (Types.ObjectId as any)(tenantId) : tenantId;
+  const tenantObjectId = Types.ObjectId.isValid(tenantId) ? new Types.ObjectId(tenantId) : tenantId;
   const [openCount, resolvedCount, aiEscalations, responseAgg, aiResolved] = await Promise.all([
     Conversation.countDocuments({ tenantId, status: { $in: ["open", "pending", "snoozed"] } }),
     Conversation.countDocuments({ tenantId, status: { $in: ["resolved", "closed"] } }),

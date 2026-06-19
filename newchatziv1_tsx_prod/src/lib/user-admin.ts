@@ -14,10 +14,10 @@ export async function getAdminUsersData(tenantId: string) {
     Tenant.findById(tenantId).lean(),
     User.find({ tenantId }).sort({ role: 1, createdAt: 1 }).lean()
   ]);
-  const admins = users.filter((user: any) => user.role === "admin").length;
-  const managers = users.filter((user: any) => user.role === "manager").length;
-  const agents = users.filter((user: any) => user.role === "agent").length;
-  const viewers = users.filter((user: any) => user.role === "viewer").length;
+  const admins = users.filter((user) => user.role === "admin").length;
+  const managers = users.filter((user) => user.role === "manager").length;
+  const agents = users.filter((user) => user.role === "agent").length;
+  const viewers = users.filter((user) => user.role === "viewer").length;
 
   return {
     ownerId: tenant?.ownerId?.toString() || "",
@@ -28,7 +28,7 @@ export async function getAdminUsersData(tenantId: string) {
       viewer: TENANT_USER_LIMITS.viewer
     },
     usage: { admin: admins, manager: managers, agent: agents, viewer: viewers },
-    users: users.map((user: any) => ({
+    users: users.map((user) => ({
       id: user._id.toString(),
       name: user.name,
       email: user.email,

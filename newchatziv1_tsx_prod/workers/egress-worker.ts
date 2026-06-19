@@ -7,6 +7,12 @@ import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { queueOutboundMessage } from "../src/server/channels/outboundQueue";
 import { publishRealtimeEvent } from "../src/lib/realtime";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "../src/lib/latency-trace";
 
 const workerName = "worker-egress";
 const connection = createRedisConnection(workerName);
@@ -26,33 +32,38 @@ export const egressWorker = new Worker(
     ]);
 
     if (!conversation || !message) throw new Error("Conversation or outbound message not found");
+    let trace = markLatencyTrace(
+      mergeLatencyTrace((job.data as any).trace, (message.metadata as any)?.trace, { traceId }),
+      "egressStartedAt"
+    );
+    await Message.updateOne(
+      { _id: message._id, tenantId },
+      { $set: { deliveryStatus: "sending", ...latencyTraceMongoSet(trace) } }
+    );
 
     const channelProvider = provider || conversation.provider || conversation.channel;
     if (["website", "webhook", "api"].includes(channelProvider)) {
-      await Message.updateOne({ _id: message._id, tenantId }, { $set: { deliveryStatus: "sent" } });
-      // For internal channels (widget/webhook), push via Socket.io so the client widget
-      // receives the message in real time without polling.
-      publishRealtimeEvent(tenantId, "message.created", {
-        message: {
-          id: messageId,
-          conversationId,
-          content: message.content,
-          direction: "outgoing",
-          sender: "assistant",
-          senderType: "assistant",
-          provider: channelProvider,
-          deliveryStatus: "sent",
-          createdAt: (message as any).createdAt?.toISOString?.() || new Date().toISOString(),
-          attachments: [],
-        },
-        conversation: {
-          id: conversationId,
-          lastMessage: (message.content || "").slice(0, 220),
-          lastMessageAt: new Date().toISOString(),
-          channel: channelProvider,
-          provider: channelProvider,
-        },
-      }).catch(() => undefined);
+      trace = markLatencyTrace(markLatencyTrace(trace, "egressCompletedAt"), "outboundSentAt");
+      const sentAt = String(trace.outboundSentAt || new Date().toISOString());
+      await Message.updateOne(
+        { _id: message._id, tenantId },
+        { $set: { deliveryStatus: "sent", ...latencyTraceMongoSet(trace) } }
+      );
+      await publishRealtimeEvent(tenantId, "delivery.updated", {
+        messageId: message._id.toString(),
+        conversationId: conversation._id.toString(),
+        status: "sent",
+        provider: channelProvider,
+        sentAt,
+      });
+      logger.info("egress.internal_channel_sent", {
+        tenantId,
+        conversationId,
+        messageId,
+        provider: channelProvider,
+        traceId,
+        latency: latencyTraceSummary(trace),
+      });
       return { queued: false, reason: "internal_channel" };
     }
 
@@ -83,13 +94,25 @@ export const egressWorker = new Worker(
       text: message.content,
       attachments: message.attachments || [],
       externalUserId: conversation.externalUserId,
-      externalThreadId: conversation.externalThreadId
+      externalThreadId: conversation.externalThreadId,
+      trace
     });
 
-    logger.info("egress.outbound_queued", { tenantId, conversationId, messageId, provider: channelProvider, traceId, enqueued: result.enqueued });
+    trace = markLatencyTrace(markLatencyTrace(trace, "outboundQueuedAt"), "egressCompletedAt");
+    await Message.updateOne({ _id: message._id, tenantId }, { $set: latencyTraceMongoSet(trace) });
+
+    logger.info("egress.outbound_queued", {
+      tenantId,
+      conversationId,
+      messageId,
+      provider: channelProvider,
+      traceId,
+      enqueued: result.enqueued,
+      latency: latencyTraceSummary(trace),
+    });
     return { queued: result.enqueued };
   },
-  { connection: connection as any, concurrency: Number(process.env.EGRESS_WORKER_CONCURRENCY || 10) }
+  { connection: connection as any, concurrency: Number(process.env.EGRESS_WORKER_CONCURRENCY || 8) }
 );
 
 egressWorker.on("failed", (job, error) => {

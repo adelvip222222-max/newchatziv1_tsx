@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import {
   Activity,
   BarChart3,
@@ -227,7 +227,7 @@ export default async function ContactsPage({
   const locale = await getLocale();
   const labels = copy[locale];
   const tenantId = session.user.tenantId;
-  const tenantObjectId = new (Types.ObjectId as any)(tenantId);
+  const tenantObjectId = new Types.ObjectId(tenantId);
   const q = (params.q || "").trim();
 
   await connectToDatabase();
@@ -250,7 +250,7 @@ export default async function ContactsPage({
     .lean();
 
   const selectedContactId =
-    params.contactId && isValidObjectId(params.contactId)
+    params.contactId && Types.ObjectId.isValid(params.contactId)
       ? params.contactId
       : contacts[0]?._id?.toString();
 

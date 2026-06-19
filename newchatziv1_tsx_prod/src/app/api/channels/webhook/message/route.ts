@@ -44,7 +44,7 @@ export async function POST(request: Request) {
 
     if (!channel) throw new Error("Webhook channel is not active for this bot.");
 
-    const signingSecret = String((channel as any).config?.signingSecret || "");
+    const signingSecret = String(channel.config?.signingSecret || "");
     const hasValidBearer = verifyBearerSecret(request, signingSecret);
     const hasValidSignature = verifySha256Hmac(rawBody, request.headers.get("x-chatzi-signature") || request.headers.get("x-webhook-signature"), signingSecret);
     if (!hasValidBearer && !hasValidSignature) {

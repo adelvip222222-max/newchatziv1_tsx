@@ -66,42 +66,10 @@ function buildModelConfig(input: {
   };
 }
 
-// ─── Model Resolution Cache ───────────────────────────────────────────────────
-// Caches the resolved model per (tenantId:botId) for up to 5 minutes.
-// This avoids 3–4 MongoDB queries on every single AI message.
-const MODEL_CACHE_TTL_MS = Number(process.env.MASTRA_MODEL_CACHE_TTL_MS || 5 * 60_000);
-
-type ModelCacheEntry = { value: ResolvedMastraModel; expiresAt: number };
-const modelResolutionCache = new Map<string, ModelCacheEntry>();
-
-function getModelFromCache(key: string): ResolvedMastraModel | null {
-  const entry = modelResolutionCache.get(key);
-  if (!entry) return null;
-  if (entry.expiresAt <= Date.now()) {
-    modelResolutionCache.delete(key);
-    return null;
-  }
-  return entry.value;
-}
-
-function setModelCache(key: string, value: ResolvedMastraModel): void {
-  modelResolutionCache.set(key, { value, expiresAt: Date.now() + MODEL_CACHE_TTL_MS });
-  // Prune stale entries if cache grows large
-  if (modelResolutionCache.size > 200) {
-    const now = Date.now();
-    for (const [k, v] of modelResolutionCache) {
-      if (v.expiresAt <= now) modelResolutionCache.delete(k);
-    }
-  }
-}
-
 export async function resolveMastraModelForBot(input: {
   tenantId: string;
   botId: string;
 }): Promise<ResolvedMastraModel> {
-  const cacheKey = `${input.tenantId}:${input.botId}`;
-  const cached = getModelFromCache(cacheKey);
-  if (cached) return cached;
   const setting = await AiSetting.findOne({
     tenantId: input.tenantId,
     botId: input.botId,
@@ -138,7 +106,7 @@ export async function resolveMastraModelForBot(input: {
     const resolvedKey = apiKey || providerApiKey;
 
     if (resolvedKey) {
-      const resolved: ResolvedMastraModel = {
+      return {
         model: buildModelConfig({
           provider,
           model: modelName,
@@ -149,8 +117,6 @@ export async function resolveMastraModelForBot(input: {
         modelUsed: modelName,
         source: "ai-model",
       };
-      setModelCache(cacheKey, resolved);
-      return resolved;
     }
   }
 
@@ -167,7 +133,7 @@ export async function resolveMastraModelForBot(input: {
 
     const modelName = DEFAULT_PROVIDER_MODELS[provider] || DEFAULT_PROVIDER_MODELS.openai;
 
-    const resolved: ResolvedMastraModel = {
+    return {
       model: buildModelConfig({
         provider,
         model: modelName,
@@ -178,8 +144,6 @@ export async function resolveMastraModelForBot(input: {
       modelUsed: modelName,
       source: "ai-provider",
     };
-    setModelCache(cacheKey, resolved);
-    return resolved;
   }
 
   throw new Error(

@@ -7,6 +7,12 @@ import { recordFailedJob } from "../src/lib/job-monitoring";
 import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { refreshConversationIntelligence } from "../src/lib/inbox/ai-copilot";
+import {
+  latencyTraceMongoSet,
+  latencyTraceSummary,
+  markLatencyTrace,
+  mergeLatencyTrace,
+} from "../src/lib/latency-trace";
 
 const workerName = "worker-core-routing";
 const connection = createRedisConnection(workerName);
@@ -27,6 +33,12 @@ export const coreRoutingWorker = new Worker(
     ]);
 
     if (!conversation || !message) throw new Error("Conversation or message not found");
+    let trace = markLatencyTrace(
+      mergeLatencyTrace((job.data as any).trace, (message.metadata as any)?.trace, { traceId }),
+      "coreRoutingStartedAt"
+    );
+    await Message.updateOne({ _id: messageId, tenantId }, { $set: latencyTraceMongoSet(trace) });
+
     if (message.direction !== "incoming" || message.sender !== "user") return { routed: false, reason: "not_customer_message" };
 
     if (conversation.status === "closed" || conversation.status === "resolved") {
@@ -83,6 +95,8 @@ export const coreRoutingWorker = new Worker(
     freshConversation.aiStatus = freshConversation.aiStatus || "active";
     await freshConversation.save();
 
+    trace = markLatencyTrace(trace, "coreRoutingCompletedAt");
+
     await aiProcessingQueue.add(
       "generate-ai-reply",
       {
@@ -93,18 +107,28 @@ export const coreRoutingWorker = new Worker(
         channelId,
         contactId: freshConversation.contactId?.toString(),
         provider,
-        traceId
+        traceId,
+        trace
       },
       {
         ...aiJobOptions,
-        jobId: makeQueueJobId("ai", messageId)
+        jobId: makeQueueJobId("ai", messageId),
+        priority: 1
       }
     );
 
-    logger.info("message.routed_to_ai", { tenantId, conversationId, messageId, traceId });
+    await Message.updateOne({ _id: messageId, tenantId }, { $set: latencyTraceMongoSet(trace) });
+
+    logger.info("message.routed_to_ai", {
+      tenantId,
+      conversationId,
+      messageId,
+      traceId,
+      latency: latencyTraceSummary(trace),
+    });
     return { routed: true, target: "ai" };
   },
-  { connection: connection as any, concurrency: Number(process.env.CORE_ROUTING_WORKER_CONCURRENCY || 10) }
+  { connection: connection as any, concurrency: Number(process.env.CORE_ROUTING_WORKER_CONCURRENCY || 6) }
 );
 
 coreRoutingWorker.on("failed", (job, error) => {

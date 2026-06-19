@@ -19,7 +19,8 @@ export const defaultJobOptions: JobsOptions = {
 
 export const aiJobOptions: JobsOptions = {
   attempts: 3,
-  backoff: { type: "exponential", delay: 5000 },
+  backoff: { type: "exponential", delay: Number(process.env.AI_JOB_BACKOFF_MS || 1000) },
+  priority: 1,
   removeOnComplete: { count: 1000, age: 24 * 60 * 60 },
   removeOnFail: { count: 5000, age: 7 * 24 * 60 * 60 }
 };

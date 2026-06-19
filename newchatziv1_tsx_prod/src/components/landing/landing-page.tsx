@@ -3,9 +3,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import Script from "next/script";
-import { useState, Suspense, useEffect } from "react";
+import { useState, Suspense } from "react";
 import { motion, Variants } from "framer-motion";
 import { LoginForm } from "@/components/auth/login-form";
+
+const fadeUp: Variants = {
+  hidden: { opacity: 0, y: 30 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.6, ease: "easeOut" } }
+};
+const stagger: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
+};
 import {
   ArrowLeft,
   ArrowRight,
@@ -43,550 +52,461 @@ import {
   MoreVertical,
   Paperclip,
   Smile,
-  Send,
-  LayoutDashboard,
-  LogIn,
+  Send
 } from "lucide-react";
 import { landingContent, type LandingLocale } from "@/lib/landing-content";
 
 const iconMap = [Database, Cpu, MessageSquare, Terminal];
 
-const fadeUp: Variants = {
-  hidden: { opacity: 0, y: 32 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] } },
-};
-const stagger: Variants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1, transition: { staggerChildren: 0.09 } },
-};
-
-/* ─── Orbit animation keyframes ─────────────────────────────────────────── */
-const KEYFRAMES = `
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Tajawal:wght@400;500;700;800;900&display=swap');
-
-  :root {
-    --font-sans: 'Inter', 'Tajawal', system-ui, sans-serif;
-  }
-  .font-landing { font-family: var(--font-sans); }
-
-  @keyframes blob-float {
-    0%,100% { transform: translate(0, 0) scale(1); }
-    33%      { transform: translate(45px, -55px) scale(1.07); }
-    66%      { transform: translate(-30px, 28px) scale(0.94); }
-  }
-  @keyframes glow-pulse {
-    0%,100% { opacity: 0.6; }
-    50%      { opacity: 1; }
-  }
-  @keyframes shimmer {
-    0%   { background-position: -200% center; }
-    100% { background-position: 200% center; }
-  }
-  @keyframes fade-in-up {
-    from { opacity: 0; transform: translateY(14px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes spin-slow {
-    from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
-  }
-  .blob { animation: blob-float 18s ease-in-out infinite; }
-  .blob-d1 { animation-delay: 0s; }
-  .blob-d2 { animation-delay: 4s; }
-  .blob-d3 { animation-delay: 8s; }
-
-  .shimmer-text {
-    background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 30%, #a78bfa 50%, #8b5cf6 70%, #6366f1 100%);
-    background-size: 200% auto;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: shimmer 4s linear infinite;
-  }
-  .glass {
-    background: rgba(255,255,255,0.75);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.55);
-  }
-  .glass-dark {
-    background: rgba(15,15,20,0.75);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255,255,255,0.08);
-  }
-  .card-hover {
-    transition: transform 0.3s cubic-bezier(.22,1,.36,1), box-shadow 0.3s ease;
-  }
-  .card-hover:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 20px 40px -10px rgba(99,102,241,0.18);
-  }
-  .btn-primary {
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-    box-shadow: 0 8px 24px -4px rgba(99,102,241,0.5), 0 1px 0 rgba(255,255,255,0.15) inset;
-    transition: all 0.25s cubic-bezier(.22,1,.36,1);
-  }
-  .btn-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 12px 32px -4px rgba(99,102,241,0.6), 0 1px 0 rgba(255,255,255,0.15) inset;
-  }
-  .btn-primary:active { transform: translateY(0); }
-
-  .nav-link {
-    position: relative;
-    padding-bottom: 2px;
-  }
-  .nav-link::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0;
-    width: 0; height: 2px;
-    background: linear-gradient(90deg, #6366f1, #8b5cf6);
-    border-radius: 2px;
-    transition: width 0.3s ease;
-  }
-  .nav-link:hover::after { width: 100%; }
-
-  .section-badge {
-    background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.1));
-    border: 1px solid rgba(99,102,241,0.2);
-    color: #6366f1;
-  }
-
-  .hero-grid {
-    background-image:
-      linear-gradient(rgba(99,102,241,0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(99,102,241,0.06) 1px, transparent 1px);
-    background-size: 64px 64px;
-    mask-image: radial-gradient(ellipse 80% 70% at 50% 0%, black 60%, transparent 100%);
-  }
-
-  .feature-card {
-    background: linear-gradient(135deg, rgba(255,255,255,0.9), rgba(249,250,251,0.9));
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(226,232,240,0.8);
-    transition: all 0.3s cubic-bezier(.22,1,.36,1);
-  }
-  .feature-card:hover {
-    border-color: rgba(99,102,241,0.3);
-    background: linear-gradient(135deg, #ffffff, rgba(238,242,255,0.9));
-    box-shadow: 0 8px 30px -8px rgba(99,102,241,0.2);
-  }
-
-  .dark-hero {
-    background: radial-gradient(ellipse 80% 60% at 50% -20%, rgba(99,102,241,0.15) 0%, transparent 70%),
-                linear-gradient(180deg, #09090b 0%, #09090b 100%);
-  }
-`;
-
-export function LandingPage({ locale, botId, isLoggedIn = false }: { locale: LandingLocale; botId?: string; isLoggedIn?: boolean }) {
+export function LandingPage({ locale, botId }: { locale: LandingLocale; botId?: string }) {
   const copy = landingContent[locale];
   const isEnglish = locale === "en";
   const ArrowIcon = isEnglish ? ArrowRight : ArrowLeft;
   const ChevronIcon = isEnglish ? ChevronRight : ChevronLeft;
 
+  // Active feature tab
+  const [activeTab, setActiveTab] = useState(0);
+
+  // Login popup state
   const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+  // Widget mockup state
   const [widgetOpen, setWidgetOpen] = useState(true);
   const [widgetMessages, setWidgetMessages] = useState<Array<{ sender: "user" | "bot"; text: string }>>([
     { sender: "bot", text: isEnglish ? "Hello! How can I help you today?" : "مرحباً! كيف يمكنني مساعدتك اليوم؟" },
     { sender: "user", text: isEnglish ? "What are your services?" : "ما هي الخدمات التي تقدمونها؟" },
-    { sender: "bot", text: isEnglish ? "We provide automated AI support, multichannel integration, and custom AI agents!" : "نحن نقدم الدعم الآلي بالذكاء الاصطناعي، والربط متعدد القنوات، والوكلاء المخصصين!" },
+    { sender: "bot", text: isEnglish ? "We provide automated AI support, multichannel integration, and custom AI agents!" : "نحن نقدم الدعم الآلي بالذكاء الاصطناعي، والربط متعدد القنوات، والوكلاء المخصصين!" }
   ]);
   const [newMessage, setNewMessage] = useState("");
-  const [expandedLog, setExpandedLog] = useState<number | null>(null);
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
-  const [scrolled, setScrolled] = useState(false);
-  const [activeTab, setActiveTab] = useState(0);
 
-  useEffect(() => {
-    const handler = () => setScrolled(window.scrollY > 12);
-    window.addEventListener("scroll", handler, { passive: true });
-    return () => window.removeEventListener("scroll", handler);
-  }, []);
+  // Webhook mockup logs
+  const [expandedLog, setExpandedLog] = useState<number | null>(null);
+
+  // FAQ state
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
     const userMsg = newMessage;
-    setWidgetMessages((prev) => [...prev, { sender: "user", text: userMsg }]);
+    setWidgetMessages(prev => [...prev, { sender: "user", text: userMsg }]);
     setNewMessage("");
     setTimeout(() => {
-      setWidgetMessages((prev) => [
-        ...prev,
-        { sender: "bot", text: isEnglish ? "This is a live demo widget simulating real AI replies!" : "هذا عنصر تجريبي حي يحاكي ردود الذكاء الاصطناعي!" },
-      ]);
-    }, 900);
+      setWidgetMessages(prev => [...prev, {
+        sender: "bot",
+        text: isEnglish
+          ? "This is a live demo widget simulating real AI replies!"
+          : "هذا عنصر تجريبي حي يحاكي ردود الذكاء الاصطناعي!"
+      }]);
+    }, 1000);
   };
 
   return (
-    <main
-      dir={copy.dir}
-      lang={copy.lang}
-      className="font-landing relative min-h-screen bg-[#09090b] text-white selection:bg-indigo-500/30 selection:text-indigo-200 overflow-x-hidden"
-    >
-      <style>{KEYFRAMES}</style>
+    <main dir={copy.dir} lang={copy.lang} className="theme-rescue relative min-h-screen bg-white font-sans text-ink selection:bg-primary-100 selection:text-primary-950 dark:bg-slate-950">
 
-      {/* ── AMBIENT BACKGROUND BLOBS ──────────────────────────────────────── */}
-      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden" aria-hidden>
-        <div className="blob blob-d1 absolute -top-40 -right-40 w-[700px] h-[700px] rounded-full bg-indigo-600/10 blur-[120px]" />
-        <div className="blob blob-d2 absolute top-1/2 -left-60 w-[600px] h-[600px] rounded-full bg-violet-600/10 blur-[140px]" />
-        <div className="blob blob-d3 absolute bottom-0 right-1/3 w-[500px] h-[500px] rounded-full bg-fuchsia-700/8 blur-[120px]" />
-      </div>
+      {/* Dynamic Keyframes for Background Animation */}
+      <style>{`
+        @keyframes float-blob {
+          0% { transform: translate(0px, 0px) scale(1); }
+          33% { transform: translate(40px, -60px) scale(1.08); }
+          66% { transform: translate(-30px, 30px) scale(0.92); }
+          100% { transform: translate(0px, 0px) scale(1); }
+        }
+        .animate-blob {
+          animation: float-blob 16s infinite ease-in-out;
+        }
+        .animation-delay-2000 {
+          animation-delay: 2.5s;
+        }
+        .animation-delay-4000 {
+          animation-delay: 5s;
+        }
+      `}</style>
 
-      {/* ── NAVBAR ────────────────────────────────────────────────────────── */}
-      <header
-        className={`sticky top-0 z-50 w-full transition-all duration-300 ${
-          scrolled
-            ? "glass-dark shadow-lg shadow-black/30"
-            : "bg-transparent border-b border-white/5"
-        }`}
-      >
+      {/* 1. STICKY NAVBAR - New Modern Style */}
+      <header className="sticky top-0 z-50 w-full backdrop-blur-md bg-white/70 border-b border-slate-200/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
+          <div className="flex justify-between items-center h-16">
             {/* Logo */}
-            <Link href={isEnglish ? "/" : "/ar"} className="flex items-center gap-2.5 group flex-shrink-0">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/30 group-hover:shadow-indigo-500/50 transition-shadow overflow-hidden">
-                <img src="/images/logo.png" alt="ChatZi" className="w-full h-full object-contain" />
+            <Link href={isEnglish ? "/" : "/ar"} className="flex-shrink-0 flex items-center gap-2 group">
+              <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center overflow-hidden shadow-md group-hover:scale-105 transition-transform">
+                <img src="/images/logo.png" alt="Logo" className="h-full w-full object-contain" />
               </div>
-              <span className="font-extrabold text-[17px] tracking-tight text-white">Chat<span className="text-indigo-400">Zi</span></span>
+              <span className="font-extrabold text-xl tracking-tight text-slate-900">ChatZi</span>
             </Link>
 
-            {/* Nav links */}
-            <nav className="hidden md:flex items-center gap-8">
+            {/* Links */}
+            <nav className="hidden md:flex space-x-8">
               {copy.nav.map((item, idx) => (
-                <a
-                  key={item}
-                  href={`#section-${idx}`}
-                  className="nav-link text-sm font-medium text-white/60 hover:text-white transition-colors"
-                >
+                <a key={item} href={`#section-${idx}`} className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors">
                   {item}
                 </a>
               ))}
             </nav>
 
             {/* Actions */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-3">
               <Link
                 href={isEnglish ? "/ar" : "/"}
-                className="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-white/50 hover:text-white/80 px-3 py-1.5 rounded-lg hover:bg-white/8 transition-all"
+                className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50 hover:border-slate-300 shadow-sm"
+                title="Language"
               >
-                <Languages size={13} />
+                <Languages size={14} className="text-slate-500" />
                 {isEnglish ? "العربية" : "English"}
               </Link>
-
-              {isLoggedIn ? (
-                /* ── مستخدم مسجل: زر لوحة التحكم ── */
-                <Link
-                  href="/dashboard"
-                  className="btn-primary flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white"
-                >
-                  <LayoutDashboard size={15} />
-                  {isEnglish ? "Dashboard" : "لوحة التحكم"}
-                </Link>
-              ) : (
-                /* ── زوار: تسجيل دخول + إنشاء حساب ── */
-                <>
-                  <button
-                    onClick={() => setIsLoginOpen(true)}
-                    className="hidden sm:flex items-center gap-1.5 text-sm font-semibold text-white/60 hover:text-white px-3 py-1.5 rounded-lg hover:bg-white/8 transition-all"
-                  >
-                    <LogIn size={14} />
-                    {copy.login}
-                  </button>
-                  <Link
-                    href="/register"
-                    className="btn-primary flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white"
-                  >
-                    {isEnglish ? "Start free" : "ابدأ مجاناً"}
-                    <Sparkles size={13} />
-                  </Link>
-                </>
-              )}
+              <button onClick={() => setIsLoginOpen(true)} className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors hidden sm:block">
+                {copy.login}
+              </button>
+              <Link href="/book" className="text-sm font-medium bg-white text-slate-900 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-colors shadow-sm hidden sm:flex">
+                {isEnglish ? "Book a call" : "احجز مكالمة"}
+              </Link>
             </div>
           </div>
         </div>
       </header>
 
-      {/* ── HERO ──────────────────────────────────────────────────────────── */}
-      <section className="relative z-10 min-h-[92vh] flex items-center pt-20 pb-24 px-4 overflow-hidden">
-        {/* Grid pattern */}
-        <div className="hero-grid absolute inset-0 pointer-events-none" />
-
-        {/* Radial glow */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-indigo-600/8 rounded-full blur-[100px] pointer-events-none" />
-
-        <div className="max-w-7xl mx-auto w-full relative z-10">
-          <motion.div
+      {/* 2. HERO SECTION & MOCKUP */}
+      <section className="relative z-10 pt-24 pb-16 sm:pt-32 sm:pb-24 lg:pb-32 px-4 w-full mx-auto overflow-hidden bg-white">
+        {/* Mesh Gradient Background */}
+        <div className="absolute inset-0 z-0 pointer-events-none opacity-[0.12]" style={{
+          background: 'linear-gradient(45deg, #1e3a8a 0%, #c026d3 50%, #fcd34d 100%)'
+        }}></div>
+        {/* Wave highlights */}
+        <div className="absolute top-[-20%] right-[-10%] w-[50%] h-[50%] bg-amber-300/30 rounded-full blur-[100px] pointer-events-none z-0"></div>
+        <div className="absolute bottom-[-10%] left-[-10%] w-[60%] h-[60%] bg-blue-700/30 rounded-full blur-[120px] pointer-events-none z-0"></div>
+        
+        {/* Fade to white at the bottom */}
+        <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-white to-transparent z-0 pointer-events-none"></div>
+        
+        <div className="max-w-[1920px] mx-auto relative z-10">
+          <motion.div 
             className="text-center max-w-4xl mx-auto"
             variants={stagger}
             initial="hidden"
-            animate="visible"
+            whileInView="visible"
+            viewport={{ once: true }}
           >
-            {/* Badge */}
-            <motion.div variants={fadeUp} className="mb-7 inline-flex items-center gap-2 px-4 py-1.5 rounded-full section-badge text-sm font-semibold">
-              <Sparkles size={13} className="text-indigo-400" />
-              <span>{copy.heroLabel}</span>
-            </motion.div>
-
-            {/* Headline */}
-            <motion.h1
-              variants={fadeUp}
-              className="text-5xl sm:text-6xl lg:text-[76px] font-black text-white tracking-tight leading-[1.05] mb-6"
-            >
-              {copy.title.split(" ").slice(0, -2).join(" ")}{" "}
-              <span className="shimmer-text">{copy.title.split(" ").slice(-2).join(" ")}</span>
-            </motion.h1>
-
-            {/* Sub */}
-            <motion.p
-              variants={fadeUp}
-              className="mt-5 text-lg sm:text-xl text-white/50 max-w-2xl mx-auto leading-relaxed font-medium"
-            >
-              {copy.subtitle}
-            </motion.p>
-
-            {/* CTAs */}
-            <motion.div
-              variants={fadeUp}
-              className="mt-10 flex flex-col sm:flex-row justify-center items-center gap-4"
-            >
-              {isLoggedIn ? (
-                /* مستخدم مسجل */
-                <Link
-                  href="/dashboard"
-                  className="btn-primary group w-full sm:w-auto px-8 py-4 rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2.5"
-                >
-                  <LayoutDashboard size={18} />
-                  {isEnglish ? "Go to Dashboard" : "الذهاب للوحة التحكم"}
-                  <ArrowIcon size={16} className="group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-              ) : (
-                <>
-                  <Link
-                    href="/register"
-                    className="btn-primary group w-full sm:w-auto px-8 py-4 rounded-2xl text-base font-bold text-white flex items-center justify-center gap-2.5"
-                  >
-                    {copy.primary}
-                    <ArrowIcon size={16} className="group-hover:translate-x-0.5 transition-transform" />
-                  </Link>
-                  <Link
-                    href="/book"
-                    className="w-full sm:w-auto px-8 py-4 rounded-2xl text-base font-semibold text-white/70 hover:text-white border border-white/10 hover:border-white/25 hover:bg-white/5 transition-all flex items-center justify-center gap-2"
-                  >
-                    <Play size={14} className="fill-current" />
-                    {isEnglish ? "Book a demo" : "احجز عرضاً"}
-                  </Link>
-                </>
-              )}
-            </motion.div>
-
-            {/* Trust badges */}
-            <motion.div variants={fadeUp} className="mt-8 flex flex-wrap items-center justify-center gap-5 text-sm text-white/35 font-medium">
-              <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-indigo-400" />{isEnglish ? "No credit card required" : "لا حاجة لبطاقة ائتمان"}</span>
-              <span className="w-1 h-1 rounded-full bg-white/20" />
-              <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-indigo-400" />{isEnglish ? "14-day free trial" : "تجربة مجانية 14 يوم"}</span>
-              <span className="w-1 h-1 rounded-full bg-white/20" />
-              <span className="flex items-center gap-1.5"><ShieldCheck size={14} className="text-indigo-400" />{isEnglish ? "Enterprise security" : "أمان مؤسسي"}</span>
-            </motion.div>
+          <motion.div variants={fadeUp} className="mb-6 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-200/50 border border-slate-200 text-sm font-medium text-slate-600 shadow-sm">
+            <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <span>{copy.heroLabel}</span>
           </motion.div>
 
-          {/* ── DASHBOARD MOCKUP ── */}
-          <motion.div
-            initial={{ opacity: 0, y: 90 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 1.1, delay: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-20 mx-auto w-full max-w-5xl relative"
-            dir="ltr"
+          <motion.h1 
+            variants={fadeUp}
+            className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-slate-900 tracking-tight leading-[1.1] mb-6"
           >
-            {/* Glow ring */}
-            <div className="absolute -inset-px rounded-2xl bg-gradient-to-b from-indigo-500/40 via-violet-500/20 to-transparent blur-sm pointer-events-none" />
-            <div className="absolute -inset-4 rounded-3xl bg-indigo-600/5 blur-2xl pointer-events-none" />
+            {copy.title.split(" ").slice(0, -1).join(" ")}{" "}
+            <span className="text-slate-900">
+              {copy.title.split(" ").pop()}
+            </span>
+          </motion.h1>
+          
+          <motion.p 
+            variants={fadeUp}
+            className="mt-6 text-lg sm:text-xl text-slate-500 max-w-2xl mx-auto leading-relaxed"
+          >
+            {copy.subtitle}
+          </motion.p>
+          
+          <motion.div 
+            variants={fadeUp}
+            className="mt-10 flex flex-col sm:flex-row justify-center items-center gap-4"
+          >
+            <Link href="/register" className="w-full sm:w-auto px-8 py-3.5 text-sm font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors shadow-lg shadow-slate-900/20 flex items-center justify-center gap-2">
+              {copy.primary}
+              <ArrowIcon size={16} className={isEnglish ? "" : "rotate-180"} />
+            </Link>
+            <Link href="/dashboard" className="w-full sm:w-auto px-8 py-3.5 text-sm font-medium text-slate-900 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center">
+              {copy.secondary}
+            </Link>
+          </motion.div>
 
-            <div className="relative bg-[#0f0f17] rounded-2xl border border-white/10 overflow-hidden flex h-[640px] shadow-2xl shadow-black/60">
-              {/* Sidebar */}
-              <aside className="w-[240px] bg-[#0c0c14] border-r border-white/[0.06] flex-col hidden md:flex">
-                <div className="p-4 border-b border-white/[0.06] flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-md">
-                    <MessageSquare className="text-white w-3.5 h-3.5" />
+          <motion.div variants={fadeUp} className="mt-8 flex items-center justify-center gap-6 text-sm text-slate-500">
+            <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-slate-400" /> {isEnglish ? "No credit card required" : "لا حاجة لبطاقة ائتمان"}</div>
+            <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-slate-400" /> {isEnglish ? "14-day free trial" : "تجربة مجانية 14 يوم"}</div>
+          </motion.div>
+        </motion.div>
+
+        {/* Dashboard Mockup */}
+        <motion.div 
+          initial={{ opacity: 0, y: 80 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 1, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="mt-24 mx-auto w-full max-w-5xl relative text-left"
+          dir="ltr"
+        >
+          {/* Outer glow */}
+
+          <div className="absolute -inset-1 bg-gradient-to-b from-slate-200 to-transparent rounded-2xl blur-xl opacity-50"></div>
+          
+          <div className="relative bg-white rounded-xl shadow-2xl shadow-slate-900/10 border border-slate-200 overflow-hidden flex h-[650px] ring-1 ring-black/[0.03]">
+            {/* Sidebar */}
+            <aside className="w-[260px] bg-slate-50/50 border-r border-slate-200 flex flex-col hidden md:flex">
+              <div className="p-4 border-b border-slate-200 flex items-center gap-3">
+                <div className="w-7 h-7 bg-slate-900 rounded-md flex items-center justify-center shadow-sm">
+                  <MessageSquare className="text-white w-3.5 h-3.5" />
+                </div>
+                <span className="font-bold text-sm text-slate-900">Workspace</span>
+              </div>
+              <div className="flex-1 overflow-y-auto py-4">
+                <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Main</div>
+                <nav className="px-2 space-y-1 mb-6">
+                  <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md bg-white border border-slate-200 text-slate-900 shadow-sm">
+                    <Inbox className="w-4 h-4 text-slate-500" />
+                    Unified Inbox
+                    <span className="ml-auto bg-slate-100 text-slate-600 py-0.5 px-2 rounded-full text-xs font-bold">12</span>
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-slate-600 hover:bg-slate-100 transition-colors">
+                    <BarChart3 className="w-4 h-4 text-slate-400" />
+                    Analytics
+                  </button>
+                  <button className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-slate-600 hover:bg-slate-100 transition-colors">
+                    <Settings className="w-4 h-4 text-slate-400" />
+                    Settings
+                  </button>
+                </nav>
+
+                <div className="px-3 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Channels</div>
+                <nav className="px-2 space-y-1">
+                  <div className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-slate-600">
+                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]"></div>
+                    WhatsApp API
                   </div>
-                  <span className="font-bold text-sm text-white/90">Workspace</span>
-                </div>
-                <div className="flex-1 overflow-y-auto py-3">
-                  <div className="px-3 mb-1.5 text-[10px] font-bold text-white/25 uppercase tracking-widest">Main</div>
-                  <nav className="px-2 space-y-0.5 mb-5">
-                    <button className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-semibold rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-                      <Inbox className="w-3.5 h-3.5" />Unified Inbox
-                      <span className="ml-auto bg-indigo-500/20 text-indigo-300 py-0.5 px-2 rounded-full text-[10px] font-bold">12</span>
-                    </button>
-                    <button className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5">
-                      <BarChart3 className="w-3.5 h-3.5" />Analytics
-                    </button>
-                    <button className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium rounded-lg text-white/40 hover:text-white/70 hover:bg-white/5">
-                      <Settings className="w-3.5 h-3.5" />Settings
-                    </button>
-                  </nav>
-                  <div className="px-3 mb-1.5 text-[10px] font-bold text-white/25 uppercase tracking-widest">Channels</div>
-                  <nav className="px-2 space-y-0.5">
-                    {[
-                      { label: "WhatsApp API", color: "bg-green-400" },
-                      { label: "Website Widget", color: "bg-blue-400" },
-                      { label: "Instagram DM", color: "bg-pink-400" },
-                    ].map(({ label, color }) => (
-                      <div key={label} className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-white/40">
-                        <div className={`w-1.5 h-1.5 rounded-full ${color} shadow-[0_0_8px_currentColor]`} />
-                        {label}
-                      </div>
-                    ))}
-                  </nav>
-                </div>
-                <div className="p-3 border-t border-white/[0.06]">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-xs font-bold text-white shadow">AG</div>
-                    <div>
-                      <div className="text-xs font-bold text-white/80">Active Agent</div>
-                      <div className="text-[10px] text-white/30 flex items-center gap-1"><div className="w-1.5 h-1.5 rounded-full bg-green-400" />Online</div>
+                  <div className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-slate-600">
+                    <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]"></div>
+                    Website Widget
+                  </div>
+                  <div className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md text-slate-600">
+                    <div className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.6)]"></div>
+                    Instagram DM
+                  </div>
+                </nav>
+              </div>
+              <div className="p-4 border-t border-slate-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-300">AG</div>
+                  <div className="flex-1">
+                    <div className="text-sm font-bold text-slate-900 leading-tight">Active Agent</div>
+                    <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div> Online
                     </div>
                   </div>
                 </div>
-              </aside>
+              </div>
+            </aside>
 
-              {/* Main */}
-              <main className="flex-1 flex flex-col bg-[#0f0f17] overflow-hidden">
-                <header className="h-13 border-b border-white/[0.06] flex items-center justify-between px-4 py-3">
-                  <h2 className="text-sm font-bold text-white/80">Unified Inbox</h2>
+            {/* Main Application Area */}
+            <main className="flex-1 flex flex-col bg-white overflow-hidden">
+              <header className="h-14 border-b border-slate-200 flex items-center justify-between px-4 bg-white">
+                <div className="flex items-center gap-4">
+                  <Menu className="w-5 h-5 text-slate-400 md:hidden" />
+                  <h2 className="text-sm font-bold text-slate-900">Unified Inbox</h2>
+                </div>
+                <div className="flex items-center gap-4">
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-white/20 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input type="text" placeholder="Search..." disabled className="pl-8 pr-4 py-1.5 bg-white/5 border border-white/8 rounded-lg text-xs w-52 outline-none placeholder-white/20 text-white/50" />
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input type="text" placeholder="Search conversations..." disabled className="pl-9 pr-4 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-sm w-64 focus:outline-none placeholder-slate-400 text-slate-900 font-medium" />
                   </div>
-                </header>
-
-                <div className="flex-1 flex overflow-hidden">
-                  {/* Conversation list */}
-                  <div className="w-[280px] border-r border-white/[0.06] flex flex-col">
-                    <div className="p-2 flex gap-1 border-b border-white/[0.06]">
-                      {["Open", "Snoozed", "Closed"].map((tab, i) => (
-                        <button key={tab} className={`flex-1 px-3 py-1.5 text-[11px] font-bold rounded-md transition-all ${i === 0 ? "bg-indigo-500/15 text-indigo-400 border border-indigo-500/20" : "text-white/30 hover:bg-white/5"}`}>{tab}</button>
-                      ))}
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                      <div className="p-3 bg-white/5 border border-indigo-500/25 rounded-xl cursor-pointer relative overflow-hidden">
-                        <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-indigo-400 to-violet-400" />
-                        <div className="flex justify-between items-start mb-1.5">
-                          <span className="text-xs font-bold text-white/90">Billing Inquiry</span>
-                          <span className="text-[10px] text-white/30">Just now</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <span className="text-[9px] px-1.5 py-0.5 bg-green-500/15 text-green-400 rounded-full font-bold">WhatsApp</span>
-                          <span className="text-[10px] text-white/25">#4092</span>
-                        </div>
-                        <p className="text-[11px] text-white/40 truncate">Could you help me update my credit card info?</p>
+                </div>
+              </header>
+              
+              <div className="flex-1 flex overflow-hidden">
+                {/* Conversation List */}
+                <div className="w-[320px] border-r border-slate-200 flex flex-col bg-slate-50/30">
+                  <div className="p-2 flex gap-1 border-b border-slate-200">
+                    <button className="flex-1 px-3 py-1.5 text-xs font-bold bg-white shadow-sm border border-slate-200 rounded-md text-slate-900">Open</button>
+                    <button className="flex-1 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 rounded-md transition-colors">Snoozed</button>
+                    <button className="flex-1 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-700 rounded-md transition-colors">Closed</button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                    {/* Active Chat Item */}
+                    <div className="p-3 bg-white border border-slate-200 rounded-lg shadow-sm cursor-pointer relative overflow-hidden ring-1 ring-slate-900/5">
+                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-slate-900"></div>
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-sm font-bold text-slate-900">Billing Inquiry</span>
+                        <span className="text-[11px] font-semibold text-slate-400">Just now</span>
                       </div>
-                      {[
-                        { title: "Sales Consultation", tag: "Widget", color: "blue", time: "2m ago", msg: "I'd like to request a demo." },
-                        { title: "Technical Support", tag: "Instagram", color: "pink", time: "1h ago", msg: "The integration is working now, thanks!" },
-                      ].map((c) => (
-                        <div key={c.title} className="p-3 border border-transparent hover:bg-white/4 hover:border-white/8 rounded-xl cursor-pointer transition-all">
-                          <div className="flex justify-between items-start mb-1.5">
-                            <span className="text-xs font-semibold text-white/60">{c.title}</span>
-                            <span className="text-[10px] text-white/25">{c.time}</span>
-                          </div>
-                          <span className="text-[9px] px-1.5 py-0.5 bg-white/8 text-white/40 rounded-full font-bold">{c.tag}</span>
-                          <p className="text-[11px] text-white/30 truncate mt-1.5">{c.msg}</p>
-                        </div>
-                      ))}
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-bold tracking-wide uppercase">WhatsApp</span>
+                        <span className="text-xs font-medium text-slate-500">ID: #4092</span>
+                      </div>
+                      <p className="text-sm text-slate-500 truncate leading-snug">Could you help me update my credit card info?</p>
+                    </div>
+
+                    {/* Unread Chat Item */}
+                    <div className="p-3 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg cursor-pointer transition-all">
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                          Sales Consultation
+                        </span>
+                        <span className="text-[11px] font-semibold text-blue-500">2m ago</span>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full font-bold tracking-wide uppercase">Widget</span>
+                        <span className="text-xs font-medium text-slate-500">ID: #4091</span>
+                      </div>
+                      <p className="text-sm text-slate-900 font-semibold truncate leading-snug">I would like to request a demo of the enterprise plan.</p>
+                    </div>
+
+                    {/* Read Chat Item */}
+                    <div className="p-3 hover:bg-white border border-transparent hover:border-slate-200 rounded-lg cursor-pointer transition-all opacity-80">
+                      <div className="flex justify-between items-start mb-1.5">
+                        <span className="text-sm font-bold text-slate-900">Technical Support</span>
+                        <span className="text-[11px] font-semibold text-slate-400">1h ago</span>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-[10px] px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full font-bold tracking-wide uppercase">Instagram</span>
+                        <span className="text-xs font-medium text-slate-500">ID: #4088</span>
+                      </div>
+                      <p className="text-sm text-slate-500 truncate leading-snug">The integration is working perfectly now, thanks!</p>
                     </div>
                   </div>
-
-                  {/* Chat detail */}
-                  <div className="flex-1 flex flex-col">
-                    <div className="h-14 border-b border-white/[0.06] flex items-center justify-between px-5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400/20 to-violet-400/20 border border-white/10 flex items-center justify-center text-white/60 font-bold text-xs">C</div>
-                        <div>
-                          <div className="text-xs font-bold text-white/80">Customer #8829</div>
-                          <div className="text-[10px] text-green-400 flex items-center gap-1"><div className="w-1 h-1 rounded-full bg-green-400" />Online via WhatsApp</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button className="p-1.5 text-white/25 hover:text-white/60 hover:bg-white/5 rounded-lg transition-colors"><Phone className="w-3.5 h-3.5" /></button>
-                        <button className="p-1.5 text-white/25 hover:text-white/60 hover:bg-white/5 rounded-lg transition-colors"><MoreVertical className="w-3.5 h-3.5" /></button>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
-                      <div className="text-center"><span className="text-[10px] text-white/25 bg-white/5 px-3 py-1 rounded-full border border-white/8">Today, 10:42 AM</span></div>
-                      <div className="flex gap-2.5 max-w-[80%]">
-                        <div className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0 mt-auto flex items-center justify-center text-[10px] font-bold text-white/40 border border-white/10">C</div>
-                        <div className="bg-white/8 border border-white/8 text-white/70 rounded-2xl rounded-bl-none px-3.5 py-2.5 text-xs leading-relaxed">
-                          Hi there! I'm trying to update my billing information but getting an error.
-                        </div>
-                      </div>
-                      <div className="flex gap-2.5 max-w-[80%] self-end flex-row-reverse">
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex-shrink-0 mt-auto flex items-center justify-center text-[10px] font-bold text-white shadow">AG</div>
-                        <div className="bg-gradient-to-br from-indigo-500 to-violet-600 text-white rounded-2xl rounded-br-none px-3.5 py-2.5 text-xs leading-relaxed shadow-lg shadow-indigo-500/20">
-                          Hello! I'd be happy to help. Could you share the last 4 digits of the card?
+                </div>
+                
+                {/* Chat Detail */}
+                <div className="flex-1 flex flex-col bg-slate-50/50 relative">
+                  {/* Chat Header */}
+                  <div className="h-16 border-b border-slate-200 flex items-center justify-between px-6 bg-white z-10 shadow-sm shadow-slate-200/20">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold border border-slate-200">C</div>
+                      <div>
+                        <div className="text-sm font-bold text-slate-900 leading-tight">Customer #8829</div>
+                        <div className="text-xs font-medium text-green-600 flex items-center gap-1 mt-0.5">
+                          <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                          Online via WhatsApp
                         </div>
                       </div>
                     </div>
-
-                    <div className="p-3 border-t border-white/[0.06]">
-                      <div className="bg-white/5 border border-white/8 rounded-xl flex flex-col focus-within:border-indigo-500/40 transition-all">
-                        <textarea className="w-full bg-transparent p-3 text-xs outline-none resize-none placeholder-white/20 text-white/60" rows={2} placeholder="Type your message..." disabled />
-                        <div className="flex items-center justify-between px-3 pb-2.5">
-                          <div className="flex gap-1">
-                            <button className="p-1.5 text-white/20 hover:text-white/50 hover:bg-white/5 rounded-lg transition-colors"><Paperclip className="w-3.5 h-3.5" /></button>
-                            <button className="p-1.5 text-white/20 hover:text-white/50 hover:bg-white/5 rounded-lg transition-colors"><Smile className="w-3.5 h-3.5" /></button>
-                          </div>
-                          <button className="flex items-center gap-1.5 btn-primary text-white px-3.5 py-1.5 rounded-lg text-xs font-bold">
-                            Send <Send className="w-3 h-3" />
-                          </button>
+                    <div className="flex items-center gap-2">
+                      <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"><Phone className="w-4 h-4" /></button>
+                      <button className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"><MoreVertical className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                  
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+                    <div className="text-center"><span className="text-xs font-bold text-slate-400 bg-white px-3 py-1 rounded-full border border-slate-200 shadow-sm shadow-slate-100">Today, 10:42 AM</span></div>
+                    
+                    {/* Incoming Message */}
+                    <div className="flex gap-3 max-w-[85%]">
+                      <div className="w-8 h-8 rounded-full bg-slate-200 flex-shrink-0 mt-auto flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-300">C</div>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 ml-1">Customer #8829</span>
+                        <div className="bg-white border border-slate-200 text-slate-900 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm text-sm leading-relaxed">
+                          Hi there! I&apos;m trying to update my billing information but getting an error on the checkout page.
                         </div>
+                      </div>
+                    </div>
+
+                    {/* Outgoing Message */}
+                    <div className="flex gap-3 max-w-[85%] self-end flex-row-reverse">
+                      <div className="w-8 h-8 rounded-full bg-slate-900 flex-shrink-0 mt-auto flex items-center justify-center text-xs font-bold text-white shadow-sm">AG</div>
+                      <div className="flex flex-col gap-1.5 items-end">
+                        <span className="text-[11px] font-bold text-slate-400 mr-1">You</span>
+                        <div className="bg-slate-900 text-white rounded-2xl rounded-br-none px-4 py-3 shadow-sm text-sm leading-relaxed">
+                          Hello! I&apos;d be happy to help you with that. Could you please provide the last 4 digits of the card you&apos;re trying to add so I can check the logs?
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 mr-1 flex items-center gap-1 mt-0.5">
+                          10:44 AM <CheckCircle2 className="w-3 h-3 text-slate-400" />
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Incoming Message */}
+                    <div className="flex gap-3 max-w-[85%]">
+                      <div className="w-8 h-8 rounded-full bg-slate-200 flex-shrink-0 mt-auto flex items-center justify-center text-xs font-bold text-slate-500 border border-slate-300">C</div>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-[11px] font-bold text-slate-400 ml-1">Customer #8829</span>
+                        <div className="bg-white border border-slate-200 text-slate-900 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm text-sm leading-relaxed">
+                          Sure, it&apos;s 4242.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Message Input */}
+                  <div className="p-4 bg-white border-t border-slate-200">
+                    <div className="bg-white border border-slate-200 rounded-xl flex flex-col focus-within:border-slate-400 focus-within:ring-2 focus-within:ring-slate-900/5 transition-all shadow-sm">
+                      <textarea 
+                        className="w-full bg-transparent p-3 text-sm outline-none resize-none placeholder-slate-400 text-slate-900 font-medium" 
+                        rows={2} 
+                        placeholder="Type your message to Customer #8829..."
+                        disabled
+                      ></textarea>
+                      <div className="flex items-center justify-between px-3 pb-3">
+                        <div className="flex items-center gap-1.5">
+                          <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"><Paperclip className="w-4.5 h-4.5" /></button>
+                          <button className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"><Smile className="w-4.5 h-4.5" /></button>
+                        </div>
+                        <button className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-800 transition-colors shadow-sm">
+                          Send <Send className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
                   </div>
                 </div>
-              </main>
-            </div>
-          </motion.div>
+              </div>
+            </main>
+          </div>
+        </motion.div>
         </div>
       </section>
 
-      {/* ── PROMO VIDEO ───────────────────────────────────────────────────── */}
-      <section className="relative py-24 overflow-hidden border-t border-white/[0.05]">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8">
-          <div className="flex flex-col lg:flex-row items-center gap-16" dir="ltr">
-            <motion.div
-              initial={{ opacity: 0, x: -60 }}
+      {/* 3. PROMO VIDEO SECTION (CHROME STYLE) */}
+      <section className="relative overflow-hidden bg-purple-50/30 py-24">
+        <div className="mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12">
+          {/* Use dir="ltr" to strictly place video on left, text on right */}
+          <div className="flex flex-col lg:flex-row items-center gap-12 lg:gap-20" dir="ltr">
+            
+            {/* Video Container (Left) */}
+            <motion.div 
+              initial={{ opacity: 0, x: -80 }}
               whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-80px" }}
+              viewport={{ once: true, margin: "-100px" }}
               transition={{ duration: 0.8, ease: "easeOut" }}
               className="w-full lg:w-1/2"
             >
-              <div className="relative rounded-2xl overflow-hidden shadow-2xl shadow-black/60 border border-white/8">
-                <div className="aspect-video w-full bg-[#0c0c14]">
-                  <video src="/promo.mp4" autoPlay loop muted playsInline className="w-full h-full object-cover" />
+              <div className="relative shadow-2xl transition-transform duration-700 hover:scale-[1.02] overflow-hidden">
+                <div className="relative aspect-video w-full bg-slate-50 flex items-center justify-center">
+                  <video
+                    src="/promo.mp4"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover"
+                  ></video>
                 </div>
-                <div className="absolute inset-0 rounded-2xl ring-1 ring-inset ring-white/10" />
               </div>
             </motion.div>
-            <motion.div
-              initial={{ opacity: 0, x: 60 }}
+
+            {/* Text Content (Right) */}
+            <motion.div 
+              initial={{ opacity: 0, x: 80 }}
               whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-80px" }}
-              transition={{ duration: 0.8, ease: "easeOut", delay: 0.15 }}
-              className="w-full lg:w-1/2"
+              viewport={{ once: true, margin: "-100px" }}
+              transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }}
+              className="w-full lg:w-1/2 text-center lg:text-right"
               dir={isEnglish ? "ltr" : "rtl"}
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full section-badge text-xs font-semibold mb-6">
-                <Sparkles size={11} />{isEnglish ? "Platform Overview" : "نظرة عامة على المنصة"}
-              </div>
-              <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-[1.1] mb-5">
-                {isEnglish ? (<>More than a chatbot.<br /><span className="shimmer-text">A smart employee.</span></>) : (<>أكثر من شات بوت،<br /><span className="shimmer-text">موظف ذكي يعمل 24/7.</span></>)}
+              <h2 className="text-[40px] font-extrabold text-slate-900 sm:text-5xl md:text-[56px] leading-[1.2] tracking-tight mb-8">
+                {isEnglish ? (
+                  <>
+                    More than just a chatbot.<br/>
+                    <span className="text-primary-600">A smart employee</span> for your business.
+                  </>
+                ) : (
+                  <>
+                    أكثر من مجرد شات بوت،<br/>
+                    <span className="bg-primary-100 text-primary-700 px-5 py-2 rounded-[2rem] inline-block mt-4 leading-relaxed">موظف ذكي</span> يعمل من أجلك.
+                  </>
+                )}
               </h2>
-              <p className="text-white/50 text-base leading-relaxed font-medium">
-                {isEnglish
-                  ? "Connect your website, Messenger, WhatsApp, and Telegram in one unified inbox. Train a customized AI for each client with isolated tenant data."
+              <p className="text-lg text-slate-600 leading-relaxed max-w-lg lg:ml-auto inline-block">
+                {isEnglish 
+                  ? "Connect your website, Messenger, WhatsApp, and Telegram in one unified inbox. Train a customized AI for each client with isolated tenant data." 
                   : "اربط موقعك وقنوات التواصل مثل ماسنجر وواتساب وتليجرام في منصة واحدة. وقم بتدريب ذكاء اصطناعي مخصص لكل عميل."}
               </p>
             </motion.div>
@@ -594,178 +514,359 @@ export function LandingPage({ locale, botId, isLoggedIn = false }: { locale: Lan
         </div>
       </section>
 
-      {/* ── FEATURES ──────────────────────────────────────────────────────── */}
-      <section id="section-0" className="py-24 border-t border-white/[0.05]">
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
+      {/* 3. DYNAMIC INTERACTIVE FEATURES SWITCHER (Leaving 200px) */}
+      <section id="section-0" className="border-t border-slate-100 bg-amber-50/30 py-24">
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className="max-w-7xl mx-auto px-6 lg:px-8"
+          className="mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12"
         >
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full section-badge text-xs font-semibold mb-5">
-              <Cpu size={11} />{isEnglish ? "Features" : "المزايا"}
-            </div>
-            <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight">{copy.featuresTitle}</h2>
-            <p className="mt-4 text-white/40 max-w-xl mx-auto font-medium">
-              {isEnglish ? "Explore our advanced modular capabilities." : "اكتشف قدراتنا المتقدمة عبر هذه العروض التجريبية."}
+          <div className="text-center">
+            <h2 className="text-3xl font-extrabold text-slate-900 sm:text-4xl md:text-[42px] leading-tight">
+              {copy.featuresTitle}
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-slate-500">
+              {isEnglish
+                ? "Experience our advanced, modular capabilities with these interactive previews built into our architecture."
+                : "اكتشف قدراتنا المتقدمة عبر هذه العروض التجريبية المدمجة في بنيتنا البرمجية."}
             </p>
           </div>
 
-          {/* Tab pills */}
-          <div className="flex flex-wrap justify-center gap-2 mb-8">
-            {copy.features.map(([title]: any, index) => {
+          {/* Pill Tabs Selector */}
+          <div className="mt-12 flex flex-wrap justify-center gap-2">
+            {copy.features.map(([title], index) => {
               const Icon = iconMap[index] || Bot;
               return (
                 <button
                   key={title}
                   onClick={() => setActiveTab(index)}
-                  className={`flex items-center gap-2 rounded-full px-5 py-2 text-sm font-semibold transition-all ${
-                    activeTab === index
-                      ? "btn-primary text-white"
-                      : "text-white/40 bg-white/5 border border-white/8 hover:text-white/70 hover:bg-white/8"
-                  }`}
+                  className={`flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition-all ${activeTab === index
+                      ? "bg-primary-600 text-white shadow-md shadow-primary-200"
+                      : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                    }`}
                 >
-                  <Icon size={14} />{title}
+                  <Icon size={16} />
+                  <span>{title}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="rounded-3xl border border-white/8 bg-white/3 p-6 lg:p-10 backdrop-blur-sm">
+          {/* Interactive Feature Panel Container */}
+          <div className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-xl lg:p-10">
             <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] items-center">
-              <div className="space-y-5">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  {(() => { const Icon = iconMap[activeTab] || Bot; return <Icon size={22} />; })()}
+
+              {/* Info text */}
+              <div className="space-y-6">
+                <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-100 text-primary-600">
+                  {(() => {
+                    const Icon = iconMap[activeTab] || Bot;
+                    return <Icon size={24} />;
+                  })()}
                 </span>
                 <div>
-                  <h3 className="text-2xl font-bold text-white">{copy.features[activeTab][0]}</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-white/50">{copy.features[activeTab][1]}</p>
+                  <h3 className="text-2xl font-bold text-slate-900">
+                    {copy.features[activeTab][0]}
+                  </h3>
+                  <p className="mt-4 text-base leading-relaxed text-slate-600">
+                    {copy.features[activeTab][1]}
+                  </p>
                 </div>
-                <Link href="/register" className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-400 hover:text-indigo-300 transition">
-                  {isEnglish ? "Explore features" : "استكشف المزايا"} <ChevronIcon size={15} />
-                </Link>
+
+                <div className="flex gap-2">
+                  <Link href="/register" className="inline-flex items-center gap-1.5 text-sm font-bold text-primary-600 hover:text-primary-700 transition">
+                    <span>{isEnglish ? "Explore features" : "استكشف المزايا"}</span>
+                    <ChevronIcon size={16} />
+                  </Link>
+                </div>
               </div>
 
-              {/* Feature panels */}
-              <div className="relative rounded-2xl border border-white/8 bg-[#0c0c14] p-4 min-h-[300px] flex items-center justify-center">
+              {/* Dynamic CSS Mockups representing features */}
+              <div className="relative rounded-2xl border border-slate-150 bg-slate-50 p-4 shadow-inner min-h-[340px] flex items-center justify-center">
+
+                {/* 1. Multi-tenant isolation simulation */}
                 {activeTab === 0 && (
-                  <div className="w-full grid gap-3 sm:grid-cols-2">
-                    {[
-                      { name: "Acme Corp", id: "101", color: "indigo", chats: 12 },
-                      { name: "Beta Health", id: "102", color: "emerald", chats: 4 },
-                    ].map((t) => (
-                      <div key={t.name} className="rounded-xl border border-white/8 bg-white/4 p-4">
-                        <div className="flex items-center justify-between border-b border-white/8 pb-2 mb-3">
-                          <div className="flex items-center gap-2">
-                            <span className={`h-2.5 w-2.5 rounded-full bg-${t.color}-400`} />
-                            <span className="text-xs font-bold text-white/80">{t.name}</span>
-                          </div>
-                          <span className="text-[10px] text-white/30 font-mono">ID:{t.id}</span>
+                  <div className="w-full grid gap-4 sm:grid-cols-2">
+                    {/* Company A */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center justify-between border-b pb-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-3 w-3 rounded-full bg-purple-500" />
+                          <span className="text-xs font-extrabold text-slate-800">Acme Corp</span>
                         </div>
-                        <div className="space-y-2 text-xs">
-                          <div className="flex justify-between bg-white/5 p-2 rounded-lg">
-                            <span className="text-white/30">Open Chats:</span>
-                            <span className={`font-bold text-${t.color}-400`}>{t.chats}</span>
-                          </div>
+                        <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-700">Tenant ID: 101</span>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between bg-slate-50 p-2 rounded">
+                          <span className="text-slate-500">Active Bot:</span>
+                          <span className="font-semibold text-slate-800">AcmeAgent</span>
+                        </div>
+                        <div className="flex justify-between bg-slate-50 p-2 rounded">
+                          <span className="text-slate-500">Open Chats:</span>
+                          <span className="font-semibold text-purple-700">12 Chats</span>
                         </div>
                       </div>
-                    ))}
+                    </div>
+
+                    {/* Company B */}
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center justify-between border-b pb-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="h-3 w-3 rounded-full bg-emerald-500" />
+                          <span className="text-xs font-extrabold text-slate-800">Beta Health</span>
+                        </div>
+                        <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Tenant ID: 102</span>
+                      </div>
+                      <div className="space-y-2 text-xs">
+                        <div className="flex justify-between bg-slate-50 p-2 rounded">
+                          <span className="text-slate-500">Active Bot:</span>
+                          <span className="font-semibold text-slate-800">DocAI</span>
+                        </div>
+                        <div className="flex justify-between bg-slate-50 p-2 rounded">
+                          <span className="text-slate-500">Open Chats:</span>
+                          <span className="font-semibold text-emerald-700">4 Chats</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="sm:col-span-2 text-center text-[10px] text-slate-400 mt-2 font-mono">
+                      Database: chatzi_db &bull; Collections isolated by tenant_id index
+                    </div>
                   </div>
                 )}
+
+                {/* 2. AI Model Library Simulation */}
                 {activeTab === 1 && (
-                  <div className="w-full space-y-2">
-                    {[
-                      { letter: "O", name: "GPT-4o (OpenAI)", key: "sk-proj-••••5x9a", active: true, color: "emerald" },
-                      { letter: "A", name: "Claude 3.5 Sonnet", key: "sk-ant-••••2q9r", active: true, color: "orange" },
-                      { letter: "G", name: "Gemini 1.5 Pro", key: "AIzaSy••••4w2c", active: false, color: "blue" },
-                    ].map((m) => (
-                      <div key={m.name} className="flex items-center justify-between rounded-xl border border-white/8 bg-white/4 p-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className={`flex h-7 w-7 items-center justify-center rounded-lg bg-${m.color}-500/15 text-${m.color}-400 text-xs font-bold`}>{m.letter}</span>
-                          <div>
-                            <p className="text-xs font-bold text-white/80">{m.name}</p>
-                            <p className="text-[10px] text-white/25 font-mono">{m.key}</p>
+                  <div className="w-full space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-xs font-bold text-slate-800">{isEnglish ? "Available Models" : "النماذج المتاحة"}</h4>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">Admin Panel View</span>
+                      </div>
+                      <div className="space-y-2">
+                        {/* GPT-4o */}
+                        <div className="flex items-center justify-between rounded-lg border border-slate-100 p-2 hover:bg-slate-50">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-100 text-emerald-700 text-xs font-bold">O</span>
+                            <div>
+                              <p className="text-xs font-bold text-slate-800">GPT-4o (OpenAI)</p>
+                              <p className="text-[9px] text-slate-400 font-mono">sk-proj-••••5x9a</p>
+                            </div>
                           </div>
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            <Check size={10} /> {isEnglish ? "Active" : "نشط"}
+                          </span>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${m.active ? "bg-emerald-500/15 text-emerald-400" : "bg-white/8 text-white/25"}`}>
-                          {m.active ? (isEnglish ? "Active" : "نشط") : (isEnglish ? "Inactive" : "غير نشط")}
-                        </span>
+
+                        {/* Claude 3.5 Sonnet */}
+                        <div className="flex items-center justify-between rounded-lg border border-slate-100 p-2 hover:bg-slate-50">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-orange-100 text-orange-700 text-xs font-bold">A</span>
+                            <div>
+                              <p className="text-xs font-bold text-slate-800">Claude 3.5 Sonnet</p>
+                              <p className="text-[9px] text-slate-400 font-mono">sk-ant-••••2q9r</p>
+                            </div>
+                          </div>
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                            <Check size={10} /> {isEnglish ? "Active" : "نشط"}
+                          </span>
+                        </div>
+
+                        {/* Gemini 1.5 Pro */}
+                        <div className="flex items-center justify-between rounded-lg border border-slate-100 p-2 hover:bg-slate-50">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-100 text-blue-700 text-xs font-bold">G</span>
+                            <div>
+                              <p className="text-xs font-bold text-slate-800">Gemini 1.5 Pro</p>
+                              <p className="text-[9px] text-slate-400 font-mono">AIzaSy••••4w2c</p>
+                            </div>
+                          </div>
+                          <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                            {isEnglish ? "Inactive" : "غير نشط"}
+                          </span>
+                        </div>
                       </div>
-                    ))}
+                    </div>
                   </div>
                 )}
+
+                {/* 3. Website Widget simulation (Interactive) */}
                 {activeTab === 2 && (
-                  <div className="w-full max-w-xs rounded-xl border border-white/8 bg-[#0f0f17] overflow-hidden flex flex-col h-[260px]">
-                    <div className="bg-white/5 px-3 py-1.5 flex items-center justify-between border-b border-white/8">
-                      <div className="flex gap-1.5"><span className="w-2 h-2 rounded-full bg-red-500/70" /><span className="w-2 h-2 rounded-full bg-yellow-500/70" /><span className="w-2 h-2 rounded-full bg-green-500/70" /></div>
-                      <span className="text-[10px] font-mono text-white/25">my-ecommerce.com</span>
-                    </div>
-                    <div className="flex-1 bg-[#0c0c14] p-3 flex flex-col justify-end gap-1.5 overflow-hidden">
-                      {widgetMessages.slice(-3).map((msg, i) => (
-                        <div key={i} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[80%] rounded-lg px-2.5 py-1.5 text-[10px] ${msg.sender === "user" ? "bg-indigo-500 text-white" : "bg-white/10 text-white/60"}`}>{msg.text}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <form onSubmit={handleSendMessage} className="border-t border-white/8 p-2 flex gap-1.5 bg-[#0f0f17]">
-                      <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder={isEnglish ? "Type a reply..." : "اكتب ردًا..."} className="flex-1 text-[10px] bg-white/5 border border-white/8 rounded-lg px-2 py-1 outline-none text-white/60 placeholder-white/20" />
-                      <button type="submit" className="bg-indigo-500 text-white text-[10px] px-2.5 py-1 rounded-lg font-bold">{isEnglish ? "Send" : "إرسال"}</button>
-                    </form>
-                  </div>
-                )}
-                {activeTab === 3 && (
-                  <div className="w-full rounded-xl bg-[#050509] border border-white/8 p-4 font-mono text-[10px] space-y-1.5 overflow-hidden">
-                    <div className="text-white/25 mb-3"># Webhook Logs — Live Feed</div>
-                    {[
-                      { status: "[POST]", color: "text-blue-400", msg: "Incoming WhatsApp message • 12:04:10" },
-                      { status: "[200 OK]", color: "text-emerald-400", msg: "AI Reply Generated • 12:04:12" },
-                      { status: "[200 OK]", color: "text-emerald-400", msg: "WhatsApp Template Sent • 12:04:13" },
-                      { status: "[500 ERR]", color: "text-red-400", msg: "Messenger Send Failed • 12:03:52" },
-                    ].map((log, i) => (
-                      <div key={i} className="flex gap-2 hover:bg-white/3 px-1 py-0.5 rounded cursor-default">
-                        <span className={`font-bold ${log.color} flex-shrink-0`}>{log.status}</span>
-                        <span className="text-white/35">{log.msg}</span>
+                  <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white overflow-hidden shadow-md flex flex-col h-[280px]">
+                    <div className="bg-slate-800 px-3 py-1.5 flex items-center justify-between text-white">
+                      <div className="flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-red-500" />
+                        <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
                       </div>
-                    ))}
+                      <span className="text-[10px] font-mono text-slate-400 select-none">my-ecommerce.com</span>
+                      <Globe size={11} className="text-slate-400" />
+                    </div>
+
+                    <div className="flex-1 bg-slate-50 p-3 relative overflow-hidden flex flex-col justify-end">
+                      <div className="text-center text-[10px] text-slate-400 absolute top-10 left-0 right-0">
+                        {isEnglish ? "Mock E-Commerce Store" : "متجر إلكتروني افتراضي"}
+                      </div>
+
+                      {/* Floating chat widget window */}
+                      {widgetOpen && (
+                        <div className="w-full flex items-end gap-2 mb-2 z-10 animate-fade-in">
+                          {/* Sidebar Mockup */}
+                          <div className="flex flex-col gap-2 mb-2">
+                            <button className="h-8 w-8 rounded-full bg-white border border-slate-200 shadow flex items-center justify-center text-primary-600 hover:scale-110 hover:border-primary-500 transition relative group">
+                              <User size={14} />
+                              <span className="absolute right-full top-1/2 -translate-y-1/2 mr-2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none after:content-[''] after:absolute after:left-full after:top-1/2 after:-translate-y-1/2 after:border-[4px] after:border-transparent after:border-l-slate-800">
+                                {isEnglish ? "Sales Expert" : "مبيعات محترف"}
+                              </span>
+                            </button>
+                            <button className="h-8 w-8 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 border border-primary-600 shadow flex items-center justify-center text-white relative group">
+                              <Bot size={14} />
+                              <span className="absolute right-full top-1/2 -translate-y-1/2 mr-2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none after:content-[''] after:absolute after:left-full after:top-1/2 after:-translate-y-1/2 after:border-[4px] after:border-transparent after:border-l-slate-800">
+                                {isEnglish ? "General Bot" : "المساعد العام"}
+                              </span>
+                            </button>
+                          </div>
+                          
+                          <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-lg flex flex-col max-h-[170px] overflow-hidden">
+                            <div className="bg-primary-600 text-white px-3 py-2 flex items-center justify-between text-[11px] font-bold">
+                            <div className="flex items-center gap-1.5">
+                              <Bot size={12} />
+                              <span>Acme AI Support</span>
+                            </div>
+                            <button onClick={() => setWidgetOpen(false)} className="text-white/80 hover:text-white">&times;</button>
+                          </div>
+                          <div className="flex-1 p-2 space-y-1.5 overflow-y-auto text-[10px]">
+                            {widgetMessages.map((msg, i) => (
+                              <div key={i} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
+                                <div className={`max-w-[80%] rounded-lg px-2.5 py-1.5 ${msg.sender === "user" ? "bg-primary-600 text-white rounded-br-none" : "bg-slate-100 text-slate-800 rounded-bl-none"
+                                  }`}>
+                                  {msg.text}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          <form onSubmit={handleSendMessage} className="border-t p-1 flex gap-1 bg-white">
+                            <input
+                              type="text"
+                              value={newMessage}
+                              onChange={(e) => setNewMessage(e.target.value)}
+                              placeholder={isEnglish ? "Type a reply..." : "اكتب ردًا..."}
+                              className="flex-1 text-[9px] border rounded px-2 py-1 outline-none"
+                            />
+                            <button type="submit" className="bg-primary-600 text-white text-[9px] px-2.5 py-1 rounded font-bold">
+                              {isEnglish ? "Send" : "إرسال"}
+                            </button>
+                          </form>
+                        </div>
+                      </div>
+                      )}
+
+                      {/* Launch Widget Button */}
+                      <div className="flex justify-end mt-auto">
+                        <button
+                          onClick={() => setWidgetOpen(!widgetOpen)}
+                          className="h-10 w-10 rounded-full bg-primary-600 text-white shadow-lg flex items-center justify-center hover:bg-primary-700 transition"
+                        >
+                          <MessageSquare size={18} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
+
+                {/* 4. Webhook logs simulation */}
+                {activeTab === 3 && (
+                  <div className="w-full font-mono text-[11px] bg-slate-900 text-slate-300 rounded-xl border border-slate-800 p-4 shadow-lg overflow-hidden max-h-[300px] overflow-y-auto">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2 text-slate-500">
+                      <span>Webhook Request Console</span>
+                      <span className="flex items-center gap-1"><Activity size={10} className="text-emerald-500 animate-pulse" /> Live</span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="cursor-pointer hover:bg-slate-800 p-1 rounded" onClick={() => setExpandedLog(expandedLog === 0 ? null : 0)}>
+                        <span className="text-emerald-500 font-bold">[200 OK]</span> Telegram Message Sent &bull; <span className="text-slate-500">12:04:15</span>
+                        {expandedLog === 0 && (
+                          <pre className="mt-1 bg-slate-950 p-2 rounded text-[10px] text-slate-400 overflow-x-auto">
+                            {`{
+  "channel": "telegram",
+  "status": "success",
+  "payload": {
+    "chat_id": 98729312,
+    "text": "Hello, how can I assist you?"
+  }
+}`}
+                          </pre>
+                        )}
+                      </div>
+                      <div className="cursor-pointer hover:bg-slate-800 p-1 rounded" onClick={() => setExpandedLog(expandedLog === 1 ? null : 1)}>
+                        <span className="text-emerald-500 font-bold">[200 OK]</span> WhatsApp Template Sent &bull; <span className="text-slate-500">12:04:09</span>
+                        {expandedLog === 1 && (
+                          <pre className="mt-1 bg-slate-950 p-2 rounded text-[10px] text-slate-400 overflow-x-auto">
+                            {`{
+  "channel": "whatsapp",
+  "status": "success",
+  "template": "welcome_message"
+}`}
+                          </pre>
+                        )}
+                      </div>
+                      <div className="cursor-pointer hover:bg-slate-800 p-1 rounded" onClick={() => setExpandedLog(expandedLog === 2 ? null : 2)}>
+                        <span className="text-red-400 font-bold">[500 Error]</span> Messenger Send Failed &bull; <span className="text-slate-500">12:03:52</span>
+                        {expandedLog === 2 && (
+                          <pre className="mt-1 bg-slate-950 p-2 rounded text-[10px] text-red-300 overflow-x-auto">
+                            {`{
+  "channel": "facebook_messenger",
+  "status": "error",
+  "error": "OAuthException: Invalid Page Access Token (expired)"
+}`}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
               </div>
+
             </div>
           </div>
+
         </motion.div>
       </section>
 
-      {/* ── CHANNELS ──────────────────────────────────────────────────────── */}
-      <section id="section-1" className="py-24 border-t border-white/[0.05]">
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
+      {/* 4. CHANNELS SECTION - Leaving 200px */}
+      <section id="section-1" className="bg-emerald-50/30 py-24">
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className="max-w-7xl mx-auto px-6 lg:px-8 grid gap-12 lg:grid-cols-[0.9fr_1.1fr] items-center"
+          className="mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12 grid gap-12 lg:grid-cols-[0.8fr_1.2fr] items-center"
         >
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full section-badge text-xs font-semibold mb-5">
-              <PlugZap size={11} />{isEnglish ? "Integrations" : "التكاملات"}
-            </div>
-            <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-tight">{copy.channelsTitle}</h2>
-            <p className="mt-4 text-white/45 leading-relaxed font-medium">
+            <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl md:text-[42px] leading-tight">
+              {copy.channelsTitle}
+            </h2>
+            <p className="mt-4 text-slate-500 leading-relaxed">
               {isEnglish
-                ? "ChatZi features production-ready endpoints for all major messaging platforms."
-                : "تتميز منصة ChatZi بوجود نقاط ربط برمجية جاهزة للإنتاج لجميع منصات المراسلة الكبرى."}
+                ? "ChatZi features functional, natively tested endpoints ready for production scaling. Connect external messenger channels directly in the settings dashboard."
+                : "تتميز منصة ChatZi بوجود نقاط ربط برمجية فعلية ومختبرة وجاهزة للإنتاج الفعلي. يمكنك توصيل قنوات المراسلة الخارجية بسهولة."}
             </p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {copy.channels.map((channel) => (
-              <div key={channel} className="feature-card group flex items-center gap-4 rounded-2xl p-4 card-hover cursor-default">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/15 group-hover:bg-indigo-500/15 transition-colors">
-                  <PlugZap size={18} />
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {copy.channels.map((channel, i) => (
+              <div
+                key={channel}
+                className="group flex items-center gap-4 rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm transition-all duration-300 hover:shadow-md hover:-translate-y-0.5"
+              >
+                <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-50 text-primary-600 transition-colors group-hover:bg-primary-50">
+                  <PlugZap className="text-primary-500" size={22} />
                 </span>
                 <div>
-                  <span className="block font-bold text-white/80 text-sm">{channel}</span>
-                  <span className="block text-[10px] text-white/30 mt-0.5 font-medium">Natively Supported</span>
+                  <span className="block font-bold text-slate-800 text-[15px]">{channel}</span>
+                  <span className="block text-[10px] text-slate-400 mt-0.5">Natively Supported</span>
                 </div>
               </div>
             ))}
@@ -773,73 +874,90 @@ export function LandingPage({ locale, botId, isLoggedIn = false }: { locale: Lan
         </motion.div>
       </section>
 
-      {/* ── SECURITY ──────────────────────────────────────────────────────── */}
-      <section id="section-2" className="py-24 border-t border-white/[0.05] relative overflow-hidden">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(99,102,241,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(99,102,241,0.04)_1px,transparent_1px)] bg-[size:3rem_3rem] pointer-events-none" />
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
+      {/* 5. SECURITY SECTION - Chrome Secure Browsing Style (Leaving 200px) */}
+      <section id="section-2" className="bg-blue-50/30 py-24 text-slate-900 relative overflow-hidden">
+        {/* Abstract grids */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20 pointer-events-none" />
+
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className="relative z-10 max-w-7xl mx-auto px-6 lg:px-8 grid gap-12 lg:grid-cols-[0.9fr_1.1fr] items-center"
+          className="relative z-10 mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12 grid gap-12 lg:grid-cols-[0.8fr_1.2fr] items-center"
         >
-          <div>
-            <span className="inline-flex h-13 w-13 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 mb-5">
-              <LockKeyhole size={26} />
+          <div className="space-y-6">
+            <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+              <LockKeyhole size={28} />
             </span>
-            <h2 className="text-4xl sm:text-5xl font-black text-white tracking-tight leading-tight">{copy.securityTitle}</h2>
+            <h2 className="text-3xl font-extrabold sm:text-4xl md:text-[42px] leading-tight">
+              {copy.securityTitle}
+            </h2>
           </div>
-          <div className="space-y-5 text-white/50 leading-relaxed font-medium">
+
+          <div className="space-y-6 text-lg leading-relaxed text-slate-700">
             <p>{copy.security}</p>
-            <div className="grid gap-3 sm:grid-cols-2 mt-4">
-              {[
-                "Tenant-Scoped Database Filters",
-                "AES Key Cryptography",
-                "End-to-End Encryption",
-                "Role-Based Access Control",
-              ].map((item) => (
-                <div key={item} className="flex items-center gap-2.5 bg-white/4 border border-white/8 rounded-xl p-3.5">
-                  <ShieldCheck className="text-emerald-400 shrink-0" size={16} />
-                  <span className="text-xs font-semibold text-white/60">{item}</span>
-                </div>
-              ))}
+
+            <div className="grid gap-4 sm:grid-cols-2 mt-6">
+              <div className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm">
+                <ShieldCheck className="text-emerald-500 shrink-0" size={20} />
+                <span className="text-xs font-semibold text-slate-800">Tenant-Scoped Database Filters</span>
+              </div>
+              <div className="flex items-center gap-2.5 bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm">
+                <ShieldCheck className="text-emerald-500 shrink-0" size={20} />
+                <span className="text-xs font-semibold text-slate-800">AES Key Cryptography</span>
+              </div>
             </div>
           </div>
         </motion.div>
       </section>
 
-      {/* ── FAQ & PRICING ─────────────────────────────────────────────────── */}
-      <section id="section-3" className="py-24 border-t border-white/[0.05]">
-        <motion.div
-          initial={{ opacity: 0, y: 40 }}
+      {/* 6. FAQ & PRICING - Google Help Center Accordion Style (Leaving 200px) */}
+      <section id="section-3" className="py-24 bg-rose-50/30">
+        <motion.div 
+          initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-80px" }}
+          viewport={{ once: true, margin: "-100px" }}
           transition={{ duration: 0.8, ease: "easeOut" }}
-          className="max-w-7xl mx-auto px-6 lg:px-8"
+          className="mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12"
         >
-          {/* Pricing banner */}
-          <div className="rounded-3xl border border-indigo-500/20 bg-gradient-to-br from-indigo-500/8 to-violet-500/8 p-8 md:p-12 text-center mb-16 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(99,102,241,0.08),transparent_70%)] pointer-events-none" />
-            <h2 className="text-4xl font-black text-white relative z-10">{copy.pricingTitle}</h2>
-            <p className="mt-4 text-white/50 leading-relaxed text-base relative z-10 max-w-2xl mx-auto font-medium">{copy.pricing}</p>
+
+          {/* Pricing Banner */}
+          <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-r from-primary-50/50 to-indigo-50/50 p-8 md:p-10 text-center shadow-sm mb-16">
+            <h2 className="text-3xl font-extrabold text-slate-900">{copy.pricingTitle}</h2>
+            <p className="mt-4 text-slate-600 leading-relaxed text-base">
+              {copy.pricing}
+            </p>
           </div>
 
-          {/* FAQ */}
-          <div className="max-w-3xl mx-auto space-y-3">
-            <h3 className="text-3xl font-black text-white text-center mb-8">{isEnglish ? "Frequently Asked Questions" : "الأسئلة الشائعة"}</h3>
-            {copy.faq.map(([question, answer]: any, index) => {
-              const open = openFaq === index;
+          {/* FAQ Accordion */}
+          <div className="max-w-4xl mx-auto space-y-4">
+            <h3 className="text-2xl font-extrabold text-slate-900 text-center mb-8">
+              {isEnglish ? "Frequently Asked Questions" : "الأسئلة الشائعة"}
+            </h3>
+
+            {copy.faq.map(([question, answer], index) => {
+              const isFaqOpen = openFaq === index;
               return (
-                <div key={question} className="rounded-2xl border border-white/8 bg-white/3 overflow-hidden transition-all hover:border-white/14">
+                <div
+                  key={question}
+                  className="rounded-2xl border border-slate-200/80 bg-white overflow-hidden transition-all duration-300 hover:border-slate-300 shadow-sm"
+                >
                   <button
-                    onClick={() => setOpenFaq(open ? null : index)}
-                    className="w-full flex items-center justify-between p-5 text-right font-semibold text-white/75 hover:text-white transition-colors text-sm"
+                    onClick={() => setOpenFaq(isFaqOpen ? null : index)}
+                    className="w-full flex items-center justify-between p-6 text-right font-bold text-slate-800 hover:text-slate-900 transition-colors text-base"
                   >
-                    <span className="flex-1 pr-4">{question}</span>
-                    {open ? <ChevronUp size={18} className="text-indigo-400 shrink-0" /> : <ChevronDown size={18} className="text-white/25 shrink-0" />}
+                    <span className="text-right flex-1 pr-4">{question}</span>
+                    {isFaqOpen ? <ChevronUp size={20} className="text-primary-600" /> : <ChevronDown size={20} className="text-slate-400" />}
                   </button>
-                  <div className={`overflow-hidden transition-all duration-300 ${open ? "max-h-64 border-t border-white/8" : "max-h-0"}`}>
-                    <p className="p-5 text-sm leading-relaxed text-white/40 font-medium">{answer}</p>
+
+                  <div
+                    className={`overflow-hidden transition-all duration-300 ${isFaqOpen ? "max-h-[300px] border-t border-slate-100" : "max-h-0"
+                      }`}
+                  >
+                    <p className="p-6 text-sm leading-relaxed text-slate-600 bg-slate-50/50">
+                      {answer}
+                    </p>
                   </div>
                 </div>
               );
@@ -848,97 +966,89 @@ export function LandingPage({ locale, botId, isLoggedIn = false }: { locale: Lan
         </motion.div>
       </section>
 
-      {/* ── CTA SECTION ───────────────────────────────────────────────────── */}
-      <section className="relative py-28 overflow-hidden border-t border-white/[0.05]">
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-600/20 via-violet-600/15 to-fuchsia-600/10 pointer-events-none" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_50%,rgba(99,102,241,0.12),transparent)] pointer-events-none" />
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
+      {/* 7. PRE-FOOTER CTA SECTION - Google Chrome Download Banner Style (Leaving 200px) */}
+      <section className="relative py-24 text-center overflow-hidden">
+        {/* Vibrant Mesh Gradient Background */}
+        <div className="absolute inset-0 z-0 pointer-events-none" style={{
+          background: 'linear-gradient(45deg, #1e3a8a 0%, #c026d3 50%, #fcd34d 100%)'
+        }}></div>
+        
+        {/* Overlay to add depth */}
+        <div className="absolute inset-0 bg-slate-900/10 pointer-events-none mix-blend-overlay"></div>
+        
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
           whileInView={{ opacity: 1, scale: 1 }}
-          viewport={{ once: true, margin: "-80px" }}
-          transition={{ duration: 0.7, ease: "easeOut" }}
-          className="relative z-10 max-w-3xl mx-auto px-6 text-center"
+          viewport={{ once: true, margin: "-100px" }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="relative z-10 mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12 text-white"
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full section-badge text-xs font-semibold mb-7">
-            <Zap size={11} className="fill-indigo-400" />{isEnglish ? "Ready to start?" : "جاهز للبدء؟"}
-          </div>
-          <h2 className="text-4xl sm:text-6xl font-black text-white tracking-tight leading-tight mb-5">
-            {isEnglish ? "Automate support on every channel" : "أتمت الدعم على كل القنوات"}
+          <h2 className="text-3xl font-extrabold tracking-tight text-white sm:text-5xl leading-tight">
+            {isEnglish ? "Automate support on every channel" : "أتمت الدعم على كل القنوات الآن"}
           </h2>
-          <p className="text-white/45 text-lg font-medium mb-10 max-w-xl mx-auto leading-relaxed">
-            {isEnglish
-              ? "Join thousands of businesses using ChatZi to manage customer relationships and drive sales."
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-white/90 font-medium">
+            {isEnglish 
+              ? "Join thousands of businesses that use ChatZi to manage customer relationships and drive sales."
               : "انضم لآلاف الشركات التي تستخدم شاتزي لإدارة علاقات العملاء وزيادة المبيعات."}
           </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            {isLoggedIn ? (
-              <Link href="/dashboard" className="btn-primary group inline-flex items-center gap-2.5 rounded-2xl px-8 py-4 text-base font-bold text-white">
-                <LayoutDashboard size={18} />
-                {isEnglish ? "Go to Dashboard" : "الذهاب للوحة التحكم"}
-                <ArrowIcon size={16} className="group-hover:translate-x-0.5 transition-transform" />
-              </Link>
-            ) : (
-              <>
-                <Link href="/register" className="btn-primary group inline-flex items-center gap-2.5 rounded-2xl px-8 py-4 text-base font-bold text-white">
-                  {copy.start}
-                  <ArrowIcon size={16} className="group-hover:translate-x-0.5 transition-transform" />
-                </Link>
-                <button
-                  onClick={() => setIsLoginOpen(true)}
-                  className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-base font-semibold text-white/60 hover:text-white border border-white/10 hover:border-white/25 hover:bg-white/5 transition-all"
-                >
-                  <LogIn size={16} />{copy.login}
-                </button>
-              </>
-            )}
+          <div className="mt-10 flex flex-wrap justify-center gap-4">
+            <Link
+              href="/register"
+              className="group inline-flex items-center justify-center gap-2 rounded-full bg-slate-900 px-8 py-4 text-[15px] font-bold text-white shadow-xl shadow-slate-900/20 transition hover:scale-[1.02] active:scale-95 hover:bg-slate-800"
+            >
+              {copy.start}
+              <ArrowIcon size={18} />
+            </Link>
           </div>
         </motion.div>
       </section>
 
-      {/* ── FOOTER ────────────────────────────────────────────────────────── */}
-      <footer className="border-t border-white/[0.05] py-10">
-        <div className="max-w-7xl mx-auto px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-5">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow overflow-hidden">
-              <img src="/images/logo.png" alt="ChatZi" className="w-full h-full object-contain" />
-            </div>
-            <span className="font-extrabold text-white/70">Chat<span className="text-indigo-400">Zi</span></span>
+      {/* 8. FOOTER - Google Chrome Clean Style (Leaving 200px) */}
+      <footer className="border-t border-slate-100 bg-white py-12 text-center text-sm text-slate-500">
+        <div className="mx-auto max-w-[1920px] px-6 xl:px-[200px] lg:px-24 md:px-12 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 text-white text-xs font-bold">
+              <img src="/images/logo.png" alt="Logo" className="h-8 w-8 object-contain" />
+            </span>
+            <span className="font-extrabold text-slate-700">ChatZi</span>
           </div>
-          <p className="text-xs text-white/25 font-semibold">{copy.footer}</p>
-          <div className="flex gap-5 text-xs text-white/25 font-semibold">
-            <Link href="/privacy" className="hover:text-indigo-400 transition-colors">{isEnglish ? "Privacy" : "الخصوصية"}</Link>
-            <span>·</span>
-            <Link href="/terms" className="hover:text-indigo-400 transition-colors">{isEnglish ? "Terms" : "الشروط"}</Link>
-            <span>·</span>
-            <Link href="/data-deletion" className="hover:text-indigo-400 transition-colors">{isEnglish ? "Data Deletion" : "حذف البيانات"}</Link>
+
+          <p className="text-xs text-slate-400 font-semibold">{copy.footer}</p>
+
+          <div className="flex gap-4 text-xs text-slate-400 font-semibold">
+            <Link href="/privacy" className="hover:text-primary-600">{isEnglish ? "Privacy Policy" : "سياسة الخصوصية"}</Link>
+            <span>&bull;</span>
+            <Link href="/terms" className="hover:text-primary-600">{isEnglish ? "Terms of Service" : "شروط الخدمة"}</Link>
+            <span>&bull;</span>
+            <Link href="/data-deletion" className="hover:text-primary-600">{isEnglish ? "Data Deletion" : "حذف البيانات"}</Link>
           </div>
         </div>
       </footer>
 
-      {/* ── LOGIN MODAL ───────────────────────────────────────────────────── */}
       {isLoginOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.93, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.93 }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            className="relative"
-          >
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="relative animate-in fade-in zoom-in-95 duration-200">
             <button
               onClick={() => setIsLoginOpen(false)}
-              className="absolute top-4 right-4 z-50 text-white/40 hover:text-white transition p-2 bg-white/8 hover:bg-white/15 rounded-xl"
+              className="absolute top-4 right-4 z-50 text-slate-400 hover:text-slate-800 transition p-2 bg-slate-100/50 hover:bg-slate-200 rounded-full"
+              title="Close"
             >
-              <X size={18} />
+              <X size={20} />
             </button>
-            <Suspense fallback={<div className="text-center py-8 text-sm text-white/40">Loading...</div>}>
+            <Suspense fallback={<div className="text-center py-6 text-sm text-white">Loading...</div>}>
               <LoginForm />
             </Suspense>
-          </motion.div>
+          </div>
         </div>
       )}
 
-      {botId && <Script src="/widget.js" data-bot-id={botId} strategy="lazyOnload" />}
+      {botId && (
+        <Script
+          src="/widget.js"
+          data-bot-id={botId}
+          strategy="lazyOnload"
+        />
+      )}
     </main>
   );
 }

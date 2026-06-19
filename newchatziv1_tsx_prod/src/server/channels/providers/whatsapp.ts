@@ -40,7 +40,7 @@ function textFromWhatsAppMessage(message: any, interactiveReplyTitle?: string, i
 }
 
 function resolveAppSecret(channel?: ChannelDocument): string {
-  const perChannel = (channel?.config as any)?.appSecret as string | undefined;
+  const perChannel = channel?.config?.appSecret as string | undefined;
   if (perChannel) return perChannel;
   return process.env.META_APP_SECRET || "";
 }

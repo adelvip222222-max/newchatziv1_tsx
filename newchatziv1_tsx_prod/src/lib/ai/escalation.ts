@@ -1,5 +1,6 @@
 import { Conversation, Message, Tenant, User } from "@/lib/models";
 import { logger } from "@/lib/logger";
+import { latencyTraceMongoSet, markLatencyTrace } from "@/lib/latency-trace";
 import { publishRealtimeEvent } from "@/lib/realtime";
 
 type EscalationReason =
@@ -17,6 +18,7 @@ type NotifyEscalationInput = {
   userMessage?: string;
   confidence?: number | null;
   summary?: string;
+  trace?: Record<string, unknown>;
 };
 
 type Recipient = { email: string; name?: string };
@@ -52,6 +54,7 @@ export async function escalateConversationToHuman(input: NotifyEscalationInput &
   await input.conversation.save();
 
   const publicMessage = input.publicMessage || DEFAULT_ESCALATION_MESSAGE;
+  let trace = markLatencyTrace(input.trace, "assistantSavedAt");
   const message = await Message.create({
     tenantId: input.tenantId,
     botId: input.conversation.botId,
@@ -63,8 +66,9 @@ export async function escalateConversationToHuman(input: NotifyEscalationInput &
     sender: "assistant",
     senderType: "assistant",
     content: publicMessage,
-    deliveryStatus: "sent",
+    deliveryStatus: "queued",
     metadata: {
+      trace,
       escalation: true,
       reason: input.reason,
       confidence: input.confidence ?? null
@@ -85,7 +89,7 @@ export async function escalateConversationToHuman(input: NotifyEscalationInput &
       sender: "assistant",
       senderType: "assistant",
       provider: input.conversation.provider || input.conversation.channel,
-      deliveryStatus: message.deliveryStatus || "sent",
+      deliveryStatus: message.deliveryStatus || "queued",
       createdAt: message.createdAt?.toISOString?.() || now.toISOString(),
       attachments: []
     },
@@ -102,6 +106,8 @@ export async function escalateConversationToHuman(input: NotifyEscalationInput &
       provider: input.conversation.provider || input.conversation.channel
     }
   }).catch(() => undefined);
+  trace = markLatencyTrace(trace, "realtimePublishedAt");
+  await Message.updateOne({ _id: message._id, tenantId: input.tenantId }, { $set: latencyTraceMongoSet(trace) });
 
   await publishRealtimeEvent(input.tenantId, "conversation.updated", {
     conversation: {

@@ -1,4 +1,3 @@
-// @ts-ignore
 import Redis from "ioredis";
 
 type RedisConnectionOptions = {
@@ -30,7 +29,7 @@ export function createRedisConnection(name: string, options: RedisConnectionOpti
     connectTimeout: 5000,
     commandTimeout: options.failFast ? 5000 : undefined,
     enableOfflineQueue: !options.failFast,
-    retryStrategy(times: any) {
+    retryStrategy(times) {
       return Math.min(times * 500, 5000);
     }
   });
@@ -39,8 +38,8 @@ export function createRedisConnection(name: string, options: RedisConnectionOpti
   return redis;
 }
 
-export function attachRedisErrorLogger(redis: any, label: string) {
-  redis.on("error", (error: any) => {
+export function attachRedisErrorLogger(redis: Redis, label: string) {
+  redis.on("error", (error) => {
     const now = Date.now();
     const lastLoggedAt = loggedErrors.get(label) || 0;
 

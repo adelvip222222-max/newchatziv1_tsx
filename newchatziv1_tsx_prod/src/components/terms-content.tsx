@@ -57,7 +57,7 @@ export function TermsContent() {
         </div>
 
         <div className="space-y-8">
-          {copy.sections.map(([heading, body]: any) => (
+          {copy.sections.map(([heading, body]) => (
             <section key={heading}>
               <h2 className="mb-3 text-xl font-bold text-slate-800">{heading}</h2>
               <div className="text-slate-600 whitespace-pre-line leading-relaxed">{body}</div>

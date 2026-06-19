@@ -3,7 +3,8 @@
 import Link from "next/link";
 import type { ComponentType } from "react";
 import { useEffect, useState } from "react";
-import { Bell, Bot, CheckCircle2, Globe, Mail, MessageCircle, Send, Smartphone, UserRound } from "lucide-react";
+import { Bell, Bot, CheckCircle2, Globe, Mail, MessageCircle, UserRound } from "lucide-react";
+import { FaFacebookF, FaInstagram, FaTelegramPlane, FaWhatsapp } from "react-icons/fa";
 import { useI18n } from "@/components/i18n-provider";
 
 type NotificationMessage = {
@@ -39,7 +40,7 @@ function parseRealtimeNotification(raw: string): NotificationMessage | null {
     const message = payload.message || {};
     const conversationId = message.conversationId || payload.conversation?.id || "";
     const id = message.id || `${conversationId}-${message.createdAt || Date.now()}`;
-    if (!conversationId || message.direction === "outgoing") return null;
+    if (!conversationId) return null;
 
     return {
       id,
@@ -64,17 +65,33 @@ function parseRealtimeNotification(raw: string): NotificationMessage | null {
 
 const providerIcons: Record<string, ComponentType<{ size?: number; className?: string }>> = {
   website: Globe,
-  telegram: Send,
-  whatsapp: Smartphone,
-  facebook: MessageCircle,
-  instagram: MessageCircle,
+  telegram: FaTelegramPlane,
+  whatsapp: FaWhatsapp,
+  facebook: FaFacebookF,
+  instagram: FaInstagram,
   email: Mail,
   api: Bot,
   webhook: Bot
 };
 
+const providerLabels: Record<string, { ar: string; en: string; tone: string }> = {
+  website: { ar: "الموقع", en: "Website", tone: "bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300" },
+  telegram: { ar: "Telegram", en: "Telegram", tone: "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" },
+  whatsapp: { ar: "WhatsApp", en: "WhatsApp", tone: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" },
+  facebook: { ar: "Facebook", en: "Facebook", tone: "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300" },
+  instagram: { ar: "Instagram", en: "Instagram", tone: "bg-pink-50 text-pink-700 dark:bg-pink-950/40 dark:text-pink-300" },
+  email: { ar: "البريد", en: "Email", tone: "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" },
+  api: { ar: "API", en: "API", tone: "bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300" },
+  webhook: { ar: "Webhook", en: "Webhook", tone: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300" },
+};
+
+function providerMeta(provider: string) {
+  return providerLabels[String(provider || "website").toLowerCase()] || providerLabels.website;
+}
+
 function formatDate(value: string, locale: "en" | "ar") {
   return new Date(value).toLocaleString(locale === "ar" ? "ar-EG" : "en-US", {
+    weekday: "short",
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -189,6 +206,7 @@ export function NotificationsMenu() {
             ) : messages.length ? (
               messages.map((message) => {
                 const Icon = providerIcons[message.provider] || MessageCircle;
+                const meta = providerMeta(message.provider);
                 const isIncoming = message.direction === "incoming";
 
                 return (
@@ -198,12 +216,8 @@ export function NotificationsMenu() {
                     onClick={() => setOpen(false)}
                     className="flex gap-3 border-b border-slate-100 px-4 py-3 transition hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900"
                   >
-                    <span className={`mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md ${
-                      isIncoming
-                        ? "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300"
-                        : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                    }`}>
-                      <Icon size={17} />
+                    <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${meta.tone}`}>
+                      <Icon size={18} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center justify-between gap-2">
@@ -215,11 +229,11 @@ export function NotificationsMenu() {
                       </span>
                       <span className="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">{message.content}</span>
                       <span className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-                        <span className="rounded bg-slate-100 px-2 py-0.5 font-semibold uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                          {message.provider}
+                        <span className={`rounded-full px-2 py-0.5 font-semibold ${meta.tone}`}>
+                          {isAr ? meta.ar : meta.en}
                         </span>
                         <span className={isIncoming ? "text-blue-600 dark:text-blue-300" : "text-emerald-600 dark:text-emerald-300"}>
-                          {isIncoming ? (isAr ? "واردة" : "Incoming") : message.status}
+                          {isIncoming ? (isAr ? "واردة الآن" : "Incoming") : message.status}
                         </span>
                       </span>
                     </span>

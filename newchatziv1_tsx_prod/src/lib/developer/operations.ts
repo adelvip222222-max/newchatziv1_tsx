@@ -215,8 +215,8 @@ export async function listDatabaseBackups(): Promise<DeveloperBackupSummary[]> {
   const names = await readdir(BACKUP_DIR).catch(() => [] as string[]);
   const backups = await Promise.all(
     names
-      .filter((name: any) => safeBackupName(name))
-      .map(async (name: any) => {
+      .filter((name) => safeBackupName(name))
+      .map(async (name) => {
         const filePath = path.join(BACKUP_DIR, name);
         const fileStat = await stat(filePath);
         return {
@@ -228,7 +228,7 @@ export async function listDatabaseBackups(): Promise<DeveloperBackupSummary[]> {
       })
   );
 
-  return backups.sort((a: any, b: any) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 20);
+  return backups.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 20);
 }
 
 function writeChunk(stream: NodeJS.WritableStream, chunk: string) {

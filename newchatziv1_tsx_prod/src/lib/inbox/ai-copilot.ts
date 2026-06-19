@@ -1,4 +1,4 @@
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import {
   Bot,
   Contact,
@@ -80,7 +80,7 @@ export async function refreshConversationIntelligence(input: {
   force?: boolean;
 }) {
   await connectToDatabase();
-  if (!isValidObjectId(input.conversationId)) {
+  if (!Types.ObjectId.isValid(input.conversationId)) {
     throw new Error("Invalid conversation id.");
   }
 
@@ -123,7 +123,7 @@ export async function refreshConversationIntelligence(input: {
 
   const transcript = messages
     .reverse()
-    .map((message: any) => {
+    .map((message) => {
       const speaker = message.sender === "agent" ? "Agent" : message.sender === "assistant" ? "AI" : "Customer";
       return `${speaker}: ${message.content}`;
     })
@@ -183,7 +183,7 @@ export async function refreshConversationIntelligence(input: {
   }
 
   if (knowledge?.results?.length) {
-    analysis.suggestedReplies = analysis.suggestedReplies.map((suggestion: any) => ({
+    analysis.suggestedReplies = analysis.suggestedReplies.map((suggestion) => ({
       ...suggestion,
       source: suggestion.source === "fallback" ? "knowledge" : suggestion.source
     }));
@@ -251,7 +251,7 @@ export async function rewriteDraft(input: {
 }
 
 async function buildConversationPrompt(tenantId: string, conversationId: string) {
-  if (!isValidObjectId(conversationId)) throw new Error("Invalid conversation id.");
+  if (!Types.ObjectId.isValid(conversationId)) throw new Error("Invalid conversation id.");
   const conversation = await Conversation.findOne({ _id: conversationId, tenantId }).lean();
   if (!conversation) throw new Error("Conversation not found.");
 
@@ -272,7 +272,7 @@ async function buildConversationPrompt(tenantId: string, conversationId: string)
 
   const transcript = messages
     .reverse()
-    .map((message: any) => `${message.sender}: ${message.content}`)
+    .map((message) => `${message.sender}: ${message.content}`)
     .join("\n");
 
   const knowledgePrompt = knowledge
@@ -575,7 +575,7 @@ function parseIntent(value: unknown, fallback: Intent): Intent {
 
 function parseStringArray(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.map((item: any) => String(item).trim()).filter(Boolean).slice(0, 8);
+  return value.map((item) => String(item).trim()).filter(Boolean).slice(0, 8);
 }
 
 function clampNumber(value: unknown, fallback: number, min = 0, max = 100) {

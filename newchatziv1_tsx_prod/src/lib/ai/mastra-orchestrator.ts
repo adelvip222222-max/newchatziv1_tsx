@@ -17,13 +17,19 @@ export async function generateAiReplyWithMastra(input: GenerateReplyInput) {
     );
   }
 
-  const payload = result.result as any;
+  const output = result.result as {
+    reply?: string;
+    conversationId?: string;
+    confidence?: number | null;
+    messageId?: string;
+    action?: string;
+  };
 
   return {
-    reply: payload.reply || "",
-    conversationId: payload.conversationId || input.conversationId || "",
-    confidence: payload.confidence ?? null,
-    messageId: payload.messageId,
-    action: payload.action,
+    reply: output.reply || "",
+    conversationId: output.conversationId || input.conversationId || "",
+    confidence: output.confidence ?? null,
+    messageId: output.messageId,
+    action: output.action,
   };
 }

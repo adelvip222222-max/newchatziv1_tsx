@@ -1,5 +1,5 @@
 import type { Stripe } from "stripe";
-import { Types, isValidObjectId } from "mongoose";
+import { Types } from "mongoose";
 import {
   BillingPlan,
   MessagePack,
@@ -24,7 +24,7 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice) {
 }
 
 function assertValidObjectId(value: string, label: string) {
-  if (!isValidObjectId(value)) {
+  if (!Types.ObjectId.isValid(value)) {
     throw new Error(`${label} is invalid.`);
   }
 }
@@ -61,8 +61,7 @@ export async function getBillingCatalog(tenantId: string) {
           usedMessages: subscription.usedMessages,
           extraMessageCredits: subscription.extraMessageCredits,
           currentPeriodEnd: subscription.currentPeriodEnd?.toISOString() || "",
-          planName: subscription.planId ? (subscription.planId as any).name : "الخطة المجانية",
-          planPriceCents: subscription.planId ? (subscription.planId as any).priceCents : 0
+          planName: subscription.planId ? (subscription.planId as any).name : "الخطة المجانية"
         }
       : null
   };
@@ -96,50 +95,26 @@ export function serializePack(pack: MessagePackDocument & { _id: Types.ObjectId 
   };
 }
 
-// ─── Billing Quota Cache ──────────────────────────────────────────────────────
-// Short-lived cache (30s) to avoid a DB query on every single AI message.
-// Safe because recordAiMessageUsage() invalidates the cache entry for that tenant.
-const billingCache = new Map<string, { allowed: boolean; expiresAt: number }>();
-const BILLING_CACHE_TTL_MS = Number(process.env.BILLING_CACHE_TTL_MS || 30_000);
-
 export async function assertCanSendAiMessage(tenantId: string) {
-  const cached = billingCache.get(tenantId);
-  if (cached && cached.expiresAt > Date.now()) {
-    if (!cached.allowed) throw new Error("تم استهلاك رصيد رسائل AI لهذه الخطة. اشتر باقة رسائل إضافية أو غيّر الخطة.");
-    return;
-  }
-
   await connectToDatabase();
   const subscription = await TenantSubscription.findOne({ tenantId });
-  if (!subscription) {
-    billingCache.set(tenantId, { allowed: true, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
-    return;
-  }
+  if (!subscription) return;
 
   const allowance = subscription.monthlyMessageLimit + subscription.extraMessageCredits;
-  if (allowance <= 0) {
-    billingCache.set(tenantId, { allowed: true, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
-    return;
-  }
+  if (allowance <= 0) return;
 
-  const allowed = subscription.usedMessages < allowance;
-  billingCache.set(tenantId, { allowed, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
-
-  if (!allowed) {
+  if (subscription.usedMessages >= allowance) {
     throw new Error("تم استهلاك رصيد رسائل AI لهذه الخطة. اشتر باقة رسائل إضافية أو غيّر الخطة.");
   }
 }
 
 export async function recordAiMessageUsage(tenantId: string) {
-  // Invalidate billing cache so next check sees the updated count
-  billingCache.delete(tenantId);
   await TenantSubscription.findOneAndUpdate(
     { tenantId },
     { $inc: { usedMessages: 1 } },
     { new: true, upsert: false }
   );
 }
-
 
 export async function createStripeCheckout(input: {
   tenantId: string;
@@ -279,7 +254,7 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const kind = session.metadata?.kind;
   const itemId = session.metadata?.itemId;
   if (!tenantId || !kind || !itemId) return;
-  if (!isValidObjectId(tenantId) || !isValidObjectId(itemId)) return;
+  if (!Types.ObjectId.isValid(tenantId) || !Types.ObjectId.isValid(itemId)) return;
 
   if (kind === "plan") {
     const plan = await BillingPlan.findOne({
