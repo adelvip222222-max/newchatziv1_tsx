@@ -26,6 +26,7 @@ import {
   type TicketPriority,
 } from "@/lib/tickets";
 import { isExplicitHumanHandoffRequest } from "@/lib/ai/handoff";
+import { publishRealtimeEvent } from "@/lib/realtime";
 
 const settingSchema = z
   .object({
@@ -146,8 +147,9 @@ function getInputAttachments(metadata: Record<string, unknown> | undefined) {
 }
 
 function getTimeoutMs() {
-  const value = Number(process.env.MASTRA_TIMEOUT_MS || 30000);
-  return Number.isFinite(value) && value > 0 ? value : 30000;
+  // Default reduced from 30s → 20s. Override via: MASTRA_TIMEOUT_MS=30000
+  const value = Number(process.env.MASTRA_TIMEOUT_MS || 20000);
+  return Number.isFinite(value) && value > 0 ? value : 20000;
 }
 
 function withTimeoutSignal() {
@@ -724,6 +726,47 @@ const persistResultStep = createStep({
 
     if (inputData.modelCalled) {
       await recordAiMessageUsage(inputData.tenantId);
+    }
+
+    // ── Realtime push ──────────────────────────────────────────────────────────
+    // Publish immediately after persisting so the dashboard/widget receives the
+    // AI reply via Socket.io without waiting for the egress worker or polling.
+    const realtimePayload = {
+      message: {
+        id: assistantMessage._id.toString(),
+        conversationId: inputData.conversationId,
+        content: reply,
+        direction: "outgoing",
+        sender: "assistant",
+        senderType: "assistant",
+        provider: inputData.channel,
+        deliveryStatus: "sent",
+        createdAt: (assistantMessage as any).createdAt?.toISOString?.() || new Date().toISOString(),
+        attachments: [],
+      },
+      conversation: {
+        id: inputData.conversationId,
+        aiStatus: action === "handoff" ? "escalated" : "active",
+        lastMessage: reply.slice(0, 220),
+        lastMessageAt: new Date().toISOString(),
+        channel: inputData.channel,
+        provider: inputData.channel,
+      },
+    };
+    publishRealtimeEvent(inputData.tenantId, "message.created", realtimePayload).catch(() => undefined);
+
+    // If escalated to human, also publish conversation.updated so dashboard reflects the status
+    if (action === "handoff") {
+      publishRealtimeEvent(inputData.tenantId, "conversation.updated", {
+        conversation: {
+          id: inputData.conversationId,
+          status: "pending",
+          mode: "human",
+          aiStatus: "escalated",
+          lastMessage: reply.slice(0, 220),
+          lastMessageAt: new Date().toISOString(),
+        },
+      }).catch(() => undefined);
     }
 
     return {

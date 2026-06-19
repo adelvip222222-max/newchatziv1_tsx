@@ -6,6 +6,7 @@ import { recordFailedJob } from "../src/lib/job-monitoring";
 import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { queueOutboundMessage } from "../src/server/channels/outboundQueue";
+import { publishRealtimeEvent } from "../src/lib/realtime";
 
 const workerName = "worker-egress";
 const connection = createRedisConnection(workerName);
@@ -29,6 +30,29 @@ export const egressWorker = new Worker(
     const channelProvider = provider || conversation.provider || conversation.channel;
     if (["website", "webhook", "api"].includes(channelProvider)) {
       await Message.updateOne({ _id: message._id, tenantId }, { $set: { deliveryStatus: "sent" } });
+      // For internal channels (widget/webhook), push via Socket.io so the client widget
+      // receives the message in real time without polling.
+      publishRealtimeEvent(tenantId, "message.created", {
+        message: {
+          id: messageId,
+          conversationId,
+          content: message.content,
+          direction: "outgoing",
+          sender: "assistant",
+          senderType: "assistant",
+          provider: channelProvider,
+          deliveryStatus: "sent",
+          createdAt: (message as any).createdAt?.toISOString?.() || new Date().toISOString(),
+          attachments: [],
+        },
+        conversation: {
+          id: conversationId,
+          lastMessage: (message.content || "").slice(0, 220),
+          lastMessageAt: new Date().toISOString(),
+          channel: channelProvider,
+          provider: channelProvider,
+        },
+      }).catch(() => undefined);
       return { queued: false, reason: "internal_channel" };
     }
 

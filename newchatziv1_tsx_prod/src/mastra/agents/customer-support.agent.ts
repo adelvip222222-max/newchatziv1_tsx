@@ -40,7 +40,9 @@ export const customerSupportAgent = new Agent({
   },
   memory: new Memory({
     options: {
-      lastMessages: 20,
+      // Reduced from 20 → 10 to limit context size sent to LLM per message.
+      // Shorter context = faster response + lower token cost. Override: MASTRA_MEMORY_MESSAGES env.
+      lastMessages: Number(process.env.MASTRA_MEMORY_MESSAGES || 10),
       workingMemory: {
         enabled: true,
         scope: "resource",

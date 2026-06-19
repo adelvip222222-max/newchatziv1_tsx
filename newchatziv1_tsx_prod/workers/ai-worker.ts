@@ -7,6 +7,7 @@ import { recordFailedJob } from "../src/lib/job-monitoring";
 import { startWorkerHeartbeat } from "../src/lib/worker-heartbeat";
 import { logger } from "../src/lib/logger";
 import { generateAiReply } from "../src/lib/ai";
+import { publishRealtimeEvent } from "../src/lib/realtime";
 
 const workerName = "worker-ai";
 const connection = createRedisConnection(workerName);
@@ -74,6 +75,50 @@ export const aiWorker = new Worker(
     if (!result.reply || !result.messageId) {
       return { generated: false, reason: "empty_reply" };
     }
+
+    // ── Realtime push (safety net) ─────────────────────────────────────────────
+    // The Mastra persistResultStep already publishes. This is a second guarantee
+    // that works for legacy mode and as a fallback if the Mastra publish fails.
+    // Fire-and-forget: never block the egress queue for a realtime event.
+    void (async () => {
+      try {
+        const [savedMessage, freshConversation] = await Promise.all([
+          Message.findById(result.messageId).select("content deliveryStatus createdAt attachments provider").lean(),
+          Conversation.findById(conversationId).select("channel provider lastMessageAt aiStatus").lean(),
+        ]);
+        if (savedMessage) {
+          await publishRealtimeEvent(tenantId, "message.created", {
+            message: {
+              id: result.messageId,
+              conversationId,
+              content: (savedMessage as any).content || result.reply,
+              direction: "outgoing",
+              sender: "assistant",
+              senderType: "assistant",
+              provider: (savedMessage as any).provider || provider || (freshConversation as any)?.channel || "",
+              deliveryStatus: (savedMessage as any).deliveryStatus || "sent",
+              createdAt: (savedMessage as any).createdAt?.toISOString?.() || new Date().toISOString(),
+              attachments: [],
+            },
+            conversation: {
+              id: conversationId,
+              aiStatus: (freshConversation as any)?.aiStatus || "active",
+              lastMessage: result.reply.slice(0, 220),
+              lastMessageAt: (freshConversation as any)?.lastMessageAt?.toISOString?.() || new Date().toISOString(),
+              channel: (freshConversation as any)?.channel || "",
+              provider: (freshConversation as any)?.provider || provider || "",
+            },
+          });
+        }
+      } catch (realtimeError) {
+        logger.warn("ai.realtime_publish_failed", {
+          tenantId,
+          conversationId,
+          messageId: result.messageId,
+          error: realtimeError instanceof Error ? realtimeError.message : "unknown",
+        });
+      }
+    })();
 
     await egressQueue.add(
       "prepare-outbound",

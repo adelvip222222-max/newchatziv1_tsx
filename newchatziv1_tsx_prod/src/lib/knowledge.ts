@@ -502,53 +502,167 @@ export async function searchKnowledge(input: { tenantId: string; botId: string; 
   const cacheKey = hash([input.tenantId, input.botId, question, limit].join("|"));
   const cached = knowledgeSearchCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
+
   const notExpired = { $or: [{ expiresAt: { $exists: false } }, { expiresAt: null }, { expiresAt: { $gt: new Date() } }] };
-  const keywordCandidates = queryKeywords.length ? await KnowledgeChunk.find({ tenantId: input.tenantId, botId: input.botId, ...notExpired, $text: { $search: queryKeywords.join(" ") } }, { score: { $meta: "textScore" } }).sort({ score: { $meta: "textScore" } }).limit(Number(process.env.KNOWLEDGE_KEYWORD_LIMIT || 40)).lean().catch(() => []) : [];
+
+  // ── 1. Keyword Search (always fast, index-backed) ──────────────────────────
+  const keywordCandidates = queryKeywords.length
+    ? await KnowledgeChunk.find(
+        { tenantId: input.tenantId, botId: input.botId, ...notExpired, $text: { $search: queryKeywords.join(" ") } },
+        { score: { $meta: "textScore" } }
+      )
+        .sort({ score: { $meta: "textScore" } })
+        .limit(Number(process.env.KNOWLEDGE_KEYWORD_LIMIT || 40))
+        .lean()
+        .catch(() => [])
+    : [];
+
   const keywordResults: KnowledgeSearchResult[] = keywordCandidates.map((item: any) => {
     const keywordScore = keywordOverlap(queryKeywords, item.keywords || [], item.normalizedText || normalizeForSearch(item.text || ""));
     const semanticScore = cosineSimilarity(localHashEmbedding(question), localHashEmbedding(item.text || ""));
-    return { text: item.text, score: Math.round(keywordScore * 100), rankScore: Math.round((keywordScore * 0.78 + semanticScore * 0.22) * 100), semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100), sourceTitle: item.sourceTitle || "Knowledge Base", sourceUrl: item.sourceUrl || "", tags: Array.isArray(item.metadata?.tags) ? item.metadata.tags : [], documentId: item.documentId.toString(), chunkId: item._id.toString(), retrievalEngine: "mongo" };
+    return {
+      text: item.text, score: Math.round(keywordScore * 100),
+      rankScore: Math.round((keywordScore * 0.78 + semanticScore * 0.22) * 100),
+      semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100),
+      sourceTitle: item.sourceTitle || "Knowledge Base", sourceUrl: item.sourceUrl || "",
+      tags: Array.isArray(item.metadata?.tags) ? item.metadata.tags : [],
+      documentId: item.documentId.toString(), chunkId: item._id.toString(), retrievalEngine: "mongo" as const,
+    };
   });
-  const keywordConfidence = calculateConfidence(dedupeKnowledgeResults(keywordResults).sort((a,b)=>(b.rankScore??b.score)-(a.rankScore??a.score)).slice(0,limit), queryKeywords);
-  const shouldUseSemantic = keywordConfidence < Number(process.env.KNOWLEDGE_FAST_KEYWORD_CONFIDENCE || 62) || keywordResults.length < Math.min(2, limit);
+
+  // ── 2. Decide whether to run semantic search ───────────────────────────────
+  // Raised default threshold from 62 → 68: more messages skip semantic (faster fast-path).
+  // Override via: KNOWLEDGE_FAST_KEYWORD_CONFIDENCE=62 (lower = more semantic)
+  const fastKeywordThreshold = Number(process.env.KNOWLEDGE_FAST_KEYWORD_CONFIDENCE || 68);
+  const keywordConfidence = calculateConfidence(
+    dedupeKnowledgeResults(keywordResults).sort((a, b) => (b.rankScore ?? b.score) - (a.rankScore ?? a.score)).slice(0, limit),
+    queryKeywords
+  );
+  const shouldUseSemantic = keywordConfidence < fastKeywordThreshold || keywordResults.length < Math.min(2, limit);
+
   let qdrantResults: KnowledgeSearchResult[] = [];
   let mongoSemanticResults: KnowledgeSearchResult[] = [];
   let queryProvider = "keyword-only";
+
   if (shouldUseSemantic) {
+    // ── 3. Fetch AiModel + create embedding ───────────────────────────────────
     const aiModel = await AiModel.findOne({ tenantId: input.tenantId, provider: "openai", isActive: true });
     const apiKey = aiModel ? decryptSecret(aiModel.apiKeyEncrypted) : "";
     const { embedding: queryEmbedding, provider } = await createEmbedding(question, apiKey);
     queryProvider = provider;
-    qdrantResults = await safeQdrantSearch({ tenantId: input.tenantId, botId: input.botId, question, queryEmbedding, queryProvider, queryKeywords, limit: Number(process.env.KNOWLEDGE_QDRANT_LIMIT || Math.max(limit * 2, 8)) });
-    const semanticCandidates = (!qdrantResults.length || qdrantResults.length < Number(process.env.KNOWLEDGE_MIN_QDRANT_RESULTS || 3) || process.env.KNOWLEDGE_ALWAYS_INCLUDE_MONGO_FALLBACK === "true") ? await KnowledgeChunk.find({ tenantId: input.tenantId, botId: input.botId, ...notExpired }).sort({ updatedAt: -1 }).limit(Number(process.env.KNOWLEDGE_CANDIDATE_LIMIT || 120)).lean() : [];
+
+    // ── 4. Run Qdrant search ───────────────────────────────────────────────────
+    qdrantResults = await safeQdrantSearch({
+      tenantId: input.tenantId, botId: input.botId, question, queryEmbedding,
+      queryProvider, queryKeywords,
+      limit: Number(process.env.KNOWLEDGE_QDRANT_LIMIT || Math.max(limit * 2, 8)),
+    });
+
+    // ── 5. MongoDB semantic fallback — only when Qdrant has too few results ────
+    // Reduced candidate limit from 120 → 60 to halve CPU-bound cosine computation.
+    // Reduced min qdrant results threshold from 3 → 2 to trigger fallback less often.
+    const minQdrant = Number(process.env.KNOWLEDGE_MIN_QDRANT_RESULTS || 2);
+    const alwaysIncludeMongo = process.env.KNOWLEDGE_ALWAYS_INCLUDE_MONGO_FALLBACK === "true";
+    const needsMongoFallback = !qdrantResults.length || qdrantResults.length < minQdrant || alwaysIncludeMongo;
+
+    const semanticCandidates = needsMongoFallback
+      ? await KnowledgeChunk.find({ tenantId: input.tenantId, botId: input.botId, ...notExpired })
+          .sort({ updatedAt: -1 })
+          .limit(Number(process.env.KNOWLEDGE_CANDIDATE_LIMIT || 60)) // reduced from 120 → 60
+          .lean()
+      : [];
+
     mongoSemanticResults = semanticCandidates.map((item: any) => {
       const itemEmbedding = Array.isArray(item.embedding) ? item.embedding : [];
       const comparableQueryEmbedding = itemEmbedding.length === queryEmbedding.length ? queryEmbedding : localHashEmbedding(question);
       const comparableItemEmbedding = itemEmbedding.length === comparableQueryEmbedding.length ? itemEmbedding : localHashEmbedding(item.text || "");
       const semanticScore = cosineSimilarity(comparableQueryEmbedding, comparableItemEmbedding);
       const keywordScore = keywordOverlap(queryKeywords, item.keywords || [], item.normalizedText || "");
-      return { text: item.text, score: Math.round(semanticScore * 100), rankScore: Math.round((semanticScore * 0.45 + keywordScore * 0.55) * 100), semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100), sourceTitle: item.sourceTitle || "Knowledge Base", sourceUrl: item.sourceUrl || "", tags: Array.isArray(item.metadata?.tags) ? item.metadata.tags : [], documentId: item.documentId.toString(), chunkId: item._id.toString(), retrievalEngine: "mongo" };
+      return {
+        text: item.text, score: Math.round(semanticScore * 100),
+        rankScore: Math.round((semanticScore * 0.45 + keywordScore * 0.55) * 100),
+        semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100),
+        sourceTitle: item.sourceTitle || "Knowledge Base", sourceUrl: item.sourceUrl || "",
+        tags: Array.isArray(item.metadata?.tags) ? item.metadata.tags : [],
+        documentId: item.documentId.toString(), chunkId: item._id.toString(), retrievalEngine: "mongo" as const,
+      };
     });
   }
+
+  // ── 6. Document-level fallback (only when very few chunks found) ─────────────
   const combinedBeforeFallback = [...keywordResults, ...qdrantResults, ...mongoSemanticResults];
-  const rawDocumentFallback = combinedBeforeFallback.length < Number(process.env.KNOWLEDGE_MIN_CHUNK_RESULTS || 4) ? await KnowledgeDocument.find({ tenantId: input.tenantId, botId: input.botId, ...notExpired, status: { $nin: ["error", "duplicate"] }, rawText: { $exists: true, $ne: "" } }).sort({ updatedAt: -1 }).limit(Number(process.env.KNOWLEDGE_DOCUMENT_FALLBACK_LIMIT || 10)).lean() : [];
+  const rawDocumentFallback = combinedBeforeFallback.length < Number(process.env.KNOWLEDGE_MIN_CHUNK_RESULTS || 4)
+    ? await KnowledgeDocument.find({
+        tenantId: input.tenantId, botId: input.botId, ...notExpired,
+        status: { $nin: ["error", "duplicate"] }, rawText: { $exists: true, $ne: "" },
+      })
+        .sort({ updatedAt: -1 })
+        .limit(Number(process.env.KNOWLEDGE_DOCUMENT_FALLBACK_LIMIT || 10))
+        .lean()
+    : [];
+
   const documentResults: KnowledgeSearchResult[] = rawDocumentFallback.map((document: any) => {
     const text = cleanText(String(document.rawText || "")).slice(0, Number(process.env.KNOWLEDGE_DOCUMENT_FALLBACK_CHARS || 1200));
     const documentKeywords = extractKeywords(text);
     const semanticScore = cosineSimilarity(localHashEmbedding(question), localHashEmbedding(text));
     const keywordScore = keywordOverlap(queryKeywords, documentKeywords, normalizeForSearch(text));
-    return { text, score: Math.round(semanticScore * 100), rankScore: Math.round((semanticScore * 0.35 + keywordScore * 0.65) * 100), semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100), sourceTitle: document.title || "Knowledge Base", sourceUrl: document.sourceUrl || "", tags: Array.isArray(document.tags) ? document.tags : [], documentId: document._id.toString(), retrievalEngine: "document-fallback" };
+    return {
+      text, score: Math.round(semanticScore * 100),
+      rankScore: Math.round((semanticScore * 0.35 + keywordScore * 0.65) * 100),
+      semanticScore: Math.round(semanticScore * 100), keywordScore: Math.round(keywordScore * 100),
+      sourceTitle: document.title || "Knowledge Base", sourceUrl: document.sourceUrl || "",
+      tags: Array.isArray(document.tags) ? document.tags : [],
+      documentId: document._id.toString(), retrievalEngine: "document-fallback" as const,
+    };
   });
-  const top = dedupeKnowledgeResults([...keywordResults, ...qdrantResults, ...mongoSemanticResults, ...documentResults]).filter((item)=>item.text&&item.text.trim().length>0).sort((a,b)=>(b.rankScore??b.score)-(a.rankScore??a.score)).slice(0, limit);
+
+  // ── 7. Merge, dedupe, rank, return ──────────────────────────────────────────
+  const top = dedupeKnowledgeResults([...keywordResults, ...qdrantResults, ...mongoSemanticResults, ...documentResults])
+    .filter((item) => item.text && item.text.trim().length > 0)
+    .sort((a, b) => (b.rankScore ?? b.score) - (a.rankScore ?? a.score))
+    .slice(0, limit);
+
   const confidence = calculateConfidence(top, queryKeywords);
-  const needsRetrainingCount = shouldUseSemantic ? await KnowledgeChunk.countDocuments({ tenantId: input.tenantId, botId: input.botId, embeddingProvider: { $ne: queryProvider } }) : 0;
-  const retrievalEngine = !shouldUseSemantic ? "mongo-keyword-fast" : qdrantResults.length ? "qdrant-hybrid" : (mongoSemanticResults.length || keywordResults.length) ? "mongo-hybrid" : "document-fallback";
-  const response = { intent: inferIntent(question), keywords: queryKeywords, confidence, results: top, embeddingProvider: queryProvider, retrievalEngine, qdrantEnabled: isQdrantEnabled(), qdrantResultCount: qdrantResults.length, mongoResultCount: keywordResults.length + mongoSemanticResults.length, documentFallbackCount: documentResults.length, fastPath: !shouldUseSemantic, ...(needsRetrainingCount > 0 ? { needsRetraining: needsRetrainingCount } : {}) };
-  knowledgeSearchCache.set(cacheKey, { expiresAt: Date.now() + Number(process.env.KNOWLEDGE_SEARCH_CACHE_TTL_MS || 10 * 60_000), value: response });
-  if (knowledgeSearchCache.size > 500) { const now = Date.now(); for (const [key, value] of knowledgeSearchCache) if (value.expiresAt <= now) knowledgeSearchCache.delete(key); }
-  logger.info("knowledge.search_completed", { tenantId: input.tenantId, botId: input.botId, results: top.length, topScore: top[0]?.score ?? null, topRankScore: top[0]?.rankScore ?? top[0]?.score ?? null, confidence, retrievalEngine, qdrantResultCount: qdrantResults.length, mongoResultCount: keywordResults.length + mongoSemanticResults.length, documentFallbackCount: documentResults.length });
+  const needsRetrainingCount = shouldUseSemantic
+    ? await KnowledgeChunk.countDocuments({ tenantId: input.tenantId, botId: input.botId, embeddingProvider: { $ne: queryProvider } })
+    : 0;
+  const retrievalEngine = !shouldUseSemantic
+    ? "mongo-keyword-fast"
+    : qdrantResults.length
+    ? "qdrant-hybrid"
+    : mongoSemanticResults.length || keywordResults.length
+    ? "mongo-hybrid"
+    : "document-fallback";
+
+  const response = {
+    intent: inferIntent(question), keywords: queryKeywords, confidence, results: top,
+    embeddingProvider: queryProvider, retrievalEngine, qdrantEnabled: isQdrantEnabled(),
+    qdrantResultCount: qdrantResults.length,
+    mongoResultCount: keywordResults.length + mongoSemanticResults.length,
+    documentFallbackCount: documentResults.length, fastPath: !shouldUseSemantic,
+    ...(needsRetrainingCount > 0 ? { needsRetraining: needsRetrainingCount } : {}),
+  };
+
+  knowledgeSearchCache.set(cacheKey, {
+    expiresAt: Date.now() + Number(process.env.KNOWLEDGE_SEARCH_CACHE_TTL_MS || 10 * 60_000),
+    value: response,
+  });
+  if (knowledgeSearchCache.size > 500) {
+    const now = Date.now();
+    for (const [key, value] of knowledgeSearchCache) if (value.expiresAt <= now) knowledgeSearchCache.delete(key);
+  }
+
+  logger.info("knowledge.search_completed", {
+    tenantId: input.tenantId, botId: input.botId, results: top.length,
+    topScore: top[0]?.score ?? null, topRankScore: top[0]?.rankScore ?? top[0]?.score ?? null,
+    confidence, retrievalEngine, fastPath: !shouldUseSemantic,
+    qdrantResultCount: qdrantResults.length,
+    mongoResultCount: keywordResults.length + mongoSemanticResults.length,
+    documentFallbackCount: documentResults.length,
+  });
   return response;
 }
+
 export function buildKnowledgePrompt(input: {
   question: string;
   intent: string;

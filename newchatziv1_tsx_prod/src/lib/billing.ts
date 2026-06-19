@@ -96,26 +96,50 @@ export function serializePack(pack: MessagePackDocument & { _id: Types.ObjectId 
   };
 }
 
+// ─── Billing Quota Cache ──────────────────────────────────────────────────────
+// Short-lived cache (30s) to avoid a DB query on every single AI message.
+// Safe because recordAiMessageUsage() invalidates the cache entry for that tenant.
+const billingCache = new Map<string, { allowed: boolean; expiresAt: number }>();
+const BILLING_CACHE_TTL_MS = Number(process.env.BILLING_CACHE_TTL_MS || 30_000);
+
 export async function assertCanSendAiMessage(tenantId: string) {
+  const cached = billingCache.get(tenantId);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (!cached.allowed) throw new Error("تم استهلاك رصيد رسائل AI لهذه الخطة. اشتر باقة رسائل إضافية أو غيّر الخطة.");
+    return;
+  }
+
   await connectToDatabase();
   const subscription = await TenantSubscription.findOne({ tenantId });
-  if (!subscription) return;
+  if (!subscription) {
+    billingCache.set(tenantId, { allowed: true, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
+    return;
+  }
 
   const allowance = subscription.monthlyMessageLimit + subscription.extraMessageCredits;
-  if (allowance <= 0) return;
+  if (allowance <= 0) {
+    billingCache.set(tenantId, { allowed: true, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
+    return;
+  }
 
-  if (subscription.usedMessages >= allowance) {
+  const allowed = subscription.usedMessages < allowance;
+  billingCache.set(tenantId, { allowed, expiresAt: Date.now() + BILLING_CACHE_TTL_MS });
+
+  if (!allowed) {
     throw new Error("تم استهلاك رصيد رسائل AI لهذه الخطة. اشتر باقة رسائل إضافية أو غيّر الخطة.");
   }
 }
 
 export async function recordAiMessageUsage(tenantId: string) {
+  // Invalidate billing cache so next check sees the updated count
+  billingCache.delete(tenantId);
   await TenantSubscription.findOneAndUpdate(
     { tenantId },
     { $inc: { usedMessages: 1 } },
     { new: true, upsert: false }
   );
 }
+
 
 export async function createStripeCheckout(input: {
   tenantId: string;
